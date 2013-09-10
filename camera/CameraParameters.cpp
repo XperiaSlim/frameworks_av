@@ -70,6 +70,7 @@ const char CameraParameters::PANORAMA_MODE_INPROGRESS[] = "in-progress";
 const char CameraParameters::KEY_PICTURE_SIZE[] = "picture-size";
 const char CameraParameters::KEY_SUPPORTED_PICTURE_SIZES[] = "picture-size-values";
 const char CameraParameters::KEY_PICTURE_FORMAT[] = "picture-format";
+const char CameraParameters::KEY_SUPPORTED_3D_FILE_FORMAT[] = "3d-file-format";
 const char CameraParameters::KEY_SUPPORTED_PICTURE_FORMATS[] = "picture-format-values";
 const char CameraParameters::KEY_JPEG_THUMBNAIL_WIDTH[] = "jpeg-thumbnail-width";
 const char CameraParameters::KEY_JPEG_THUMBNAIL_HEIGHT[] = "jpeg-thumbnail-height";
@@ -211,7 +212,6 @@ const char CameraParameters::POST_PROCESSING_ENABLE[] = "enable";
 const char CameraParameters::POST_PROCESSING_BYPASS[] = "bypass";
 const char CameraParameters::POST_PROCESSING_DELAY[] = "delay";
 const char CameraParameters::SCENE_MODE_OFF[] = "off";
-const char CameraParameters::SCENE_MODE_TEXT[] = "text";
 const char CameraParameters::BURST_MODE_LIMIT20[] = "limit-20";
 const char CameraParameters::BURST_MODE_UNLIMITED[] = "unlimited";
 const char CameraParameters::OIS_MODE_OFF[] = "off";
@@ -225,7 +225,6 @@ const char CameraParameters::KEY_GPU_EFFECT_PARAM_0[] = "GE-param0";
 const char CameraParameters::KEY_GPU_EFFECT_PARAM_1[] = "GE-param1";
 const char CameraParameters::KEY_GPU_EFFECT_PARAM_2[] = "GE-param2";
 const char CameraParameters::KEY_GPU_EFFECT_PARAM_3[] = "GE-param3";
-const char CameraParameters::KEY_FORCE_USE_AUDIO_ENABLED[] = "forceuseaudio";
 #endif
 
 const char CameraParameters::TRUE[] = "true";
@@ -292,12 +291,13 @@ const char CameraParameters::SCENE_MODE_FIREWORKS[] = "fireworks";
 const char CameraParameters::SCENE_MODE_SPORTS[] = "sports";
 const char CameraParameters::SCENE_MODE_PARTY[] = "party";
 const char CameraParameters::SCENE_MODE_CANDLELIGHT[] = "candlelight";
-#ifdef QCOM_HARDWARE
-#ifdef SAMSUNG_CAMERA_LEGACY
-const char CameraParameters::SCENE_MODE_BACKLIGHT[] = "back-light";
-#else
+#ifdef STE_HARDWARE
 const char CameraParameters::SCENE_MODE_BACKLIGHT[] = "backlight";
+const char CameraParameters::SCENE_MODE_DUSKDAWN[] = "duskdawn";
+const char CameraParameters::SCENE_MODE_FALLCOLOR[] = "fallcolor";
+const char CameraParameters::SCENE_MODE_TEXT[] = "text";
 #endif
+#ifdef QCOM_HARDWARE
 const char CameraParameters::SCENE_MODE_FLOWERS[] = "flowers";
 #endif
 const char CameraParameters::SCENE_MODE_BARCODE[] = "barcode";
@@ -315,11 +315,21 @@ const char CameraParameters::SCENE_DETECT_ON[] = "on";
 // Formats for setPreviewFormat and setPictureFormat.
 const char CameraParameters::PIXEL_FORMAT_YUV422SP[] = "yuv422sp";
 const char CameraParameters::PIXEL_FORMAT_YUV420SP[] = "yuv420sp";
+#ifdef STE_HARDWARE
+const char CameraParameters::PIXEL_FORMAT_YUV420SPNV12[] = "yuv420spnv12";
+#endif
 #ifdef QCOM_HARDWARE
 const char CameraParameters::PIXEL_FORMAT_YUV420SP_ADRENO[] = "yuv420sp-adreno";
 #endif
 const char CameraParameters::PIXEL_FORMAT_YUV422I[] = "yuv422i-yuyv";
 const char CameraParameters::PIXEL_FORMAT_YUV420P[]  = "yuv420p";
+#ifdef STE_HARDWARE
+const char CameraParameters::PIXEL_FORMAT_YUV420MB[] = "yuv420mb";
+const char CameraParameters::PIXEL_FORMAT_YVU422SP[] = "yvu422sp";
+const char CameraParameters::PIXEL_FORMAT_YVU422P[] = "yvu422p";
+const char CameraParameters::PIXEL_FORMAT_YVU420SP[] = "yvu420sp";
+const char CameraParameters::PIXEL_FORMAT_YVU420P[]  = "yvu420p";
+#endif
 const char CameraParameters::PIXEL_FORMAT_RGB565[] = "rgb565";
 const char CameraParameters::PIXEL_FORMAT_RGBA8888[] = "rgba8888";
 const char CameraParameters::PIXEL_FORMAT_JPEG[] = "jpeg";
@@ -421,6 +431,9 @@ const char CameraParameters::SELECTABLE_ZONE_AF_FRAME_AVERAGE[] = "frame-average
 const char CameraParameters::FACE_DETECTION_OFF[] = "off";
 const char CameraParameters::FACE_DETECTION_ON[] = "on";
 
+const char CameraParameters::FILE_FORMAT_MPO[] = "mpo";
+const char CameraParameters::FILE_FORMAT_JPS[] = "jps";
+
 // Values for MCE settings.
 const char CameraParameters::MCE_ENABLE[] = "enable";
 const char CameraParameters::MCE_DISABLE[] = "disable";
@@ -450,7 +463,6 @@ const char CameraParameters::AE_BRACKET[] = "AE-Bracket";
 const char CameraParameters::LOW_POWER[] = "Low_Power";
 const char CameraParameters::NORMAL_POWER[] = "Normal_Power";
 
-#if defined(QCOM_HARDWARE) && defined(SAMSUNG_CAMERA_LEGACY)
 const char CameraParameters::FOCUS_MODE_FACEDETECT[] = "facedetect";
 const char CameraParameters::FOCUS_MODE_TOUCHAF[] = "touchaf";
 const char CameraParameters::ISO_50[] = "ISO50";
@@ -465,12 +477,6 @@ const char CameraParameters::VINTAGE_MODE_COOL[] = "cool";
 const char CameraParameters::VINTAGE_MODE_NORMAL[] = "normal";
 const char CameraParameters::VINTAGE_MODE_OFF[] = "off";
 const char CameraParameters::VINTAGE_MODE_WARM[] = "warm";
-const char CameraParameters::SCENE_MODE_DAWN[] = "dusk-dawn";
-const char CameraParameters::SCENE_MODE_DUSKDAWN[] = "dusk-dawn";
-const char CameraParameters::SCENE_MODE_FALL[] = "fall-color";
-const char CameraParameters::SCENE_MODE_FALL_COLOR[] = "fall-color";
-const char CameraParameters::SCENE_MODE_TEXT[] = "text";
-#endif
 
 static const char* portrait = "portrait";
 static const char* landscape = "landscape";
@@ -492,6 +498,11 @@ void CameraParameters::setOrientation(int orientation)
 }
 #endif
 
+#ifdef STE_HARDWARE
+// keys for record stride and sliceheight
+const char CameraParameters::KEY_RECORD_STRIDE[] = "record-stride";
+const char CameraParameters::KEY_RECORD_SLICE_HEIGHT[] = "record-slice-height";
+#endif
 
 CameraParameters::CameraParameters()
                 : mMap()
@@ -833,6 +844,11 @@ void CameraParameters::getSupportedPictureSizes(Vector<Size> &sizes) const
 {
     const char *pictureSizesStr = get(KEY_SUPPORTED_PICTURE_SIZES);
     parseSizesList(pictureSizesStr, sizes);
+}
+
+void CameraParameters::set3DFileFormat(const char *format)
+{
+    set(KEY_SUPPORTED_3D_FILE_FORMAT, format);
 }
 
 void CameraParameters::setPictureFormat(const char *format)
