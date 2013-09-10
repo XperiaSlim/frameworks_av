@@ -117,6 +117,7 @@ public:
     void setPictureSize(int width, int height);
     void getPictureSize(int *width, int *height) const;
     void getSupportedPictureSizes(Vector<Size> &sizes) const;
+    void set3DFileFormat(const char* buffer);
     void setPictureFormat(const char *format);
     const char *getPictureFormat() const;
 #ifdef QCOM_HARDWARE
@@ -203,6 +204,8 @@ public:
     // Supported dimensions for captured pictures in pixels.
     // Example value: "2048x1536,1024x768". Read only.
     static const char KEY_SUPPORTED_PICTURE_SIZES[];
+    //HTC 3D color format
+    static const char KEY_SUPPORTED_3D_FILE_FORMAT[];
     // The image format for captured pictures. See CAMERA_MSG_COMPRESSED_IMAGE
     // in frameworks/base/include/camera/Camera.h.
     // Example value: "jpeg" or PIXEL_FORMAT_XXX constants. Read/write.
@@ -689,7 +692,6 @@ public:
     static const char KEY_GPU_EFFECT_PARAM_1[];
     static const char KEY_GPU_EFFECT_PARAM_2[];
     static const char KEY_GPU_EFFECT_PARAM_3[];
-    static const char KEY_FORCE_USE_AUDIO_ENABLED[];
 #endif
 
     static const char KEY_AE_BRACKET_HDR[];
@@ -787,8 +789,13 @@ public:
     static const char SCENE_MODE_SPORTS[];
     static const char SCENE_MODE_PARTY[];
     static const char SCENE_MODE_CANDLELIGHT[];
-#ifdef QCOM_HARDWARE
+#ifdef STE_HARDWARE
     static const char SCENE_MODE_BACKLIGHT[];
+    static const char SCENE_MODE_DUSKDAWN[];
+    static const char SCENE_MODE_FALLCOLOR[];
+    static const char SCENE_MODE_TEXT[];
+#endif
+#ifdef QCOM_HARDWARE
     static const char SCENE_MODE_FLOWERS[];
     static const char SCENE_MODE_AR[];
 #endif
@@ -808,11 +815,21 @@ public:
 #endif
     static const char PIXEL_FORMAT_YUV422SP[];
     static const char PIXEL_FORMAT_YUV420SP[]; // NV21
+#ifdef STE_HARDWARE
+    static const char PIXEL_FORMAT_YUV420SPNV12[]; // NV12
+#endif
 #ifdef QCOM_HARDWARE
     static const char PIXEL_FORMAT_YUV420SP_ADRENO[]; // ADRENO
 #endif
     static const char PIXEL_FORMAT_YUV422I[]; // YUY2
     static const char PIXEL_FORMAT_YUV420P[]; // YV12
+#ifdef STE_HARDWARE
+    static const char PIXEL_FORMAT_YVU422SP[];
+    static const char PIXEL_FORMAT_YVU422P[];
+    static const char PIXEL_FORMAT_YVU420SP[];
+    static const char PIXEL_FORMAT_YVU420P[];
+    static const char PIXEL_FORMAT_YUV420MB[];
+#endif
     static const char PIXEL_FORMAT_RGB565[];
     static const char PIXEL_FORMAT_RGBA8888[];
     static const char PIXEL_FORMAT_JPEG[];
@@ -879,6 +896,11 @@ public:
     // To stop continuous focus, applications should change the focus mode to
     // other modes.
     static const char FOCUS_MODE_CONTINUOUS_PICTURE[];
+#ifdef STE_HARDWARE
+    // keys for record stride and slice height
+    static const char KEY_RECORD_STRIDE[];
+    static const char KEY_RECORD_SLICE_HEIGHT[];
+#endif
 
 #ifdef QCOM_HARDWARE
 #ifdef QCOM_LEGACY_CAM_PARAMS
@@ -958,6 +980,10 @@ public:
     static const char FACE_DETECTION_OFF[];
     static const char FACE_DETECTION_ON[];
 
+    // Values for HTC 3D image settings.
+    static const char FILE_FORMAT_MPO[];
+    static const char FILE_FORMAT_JPS[];
+
     // Values for MCE settings.
     static const char MCE_ENABLE[];
     static const char MCE_DISABLE[];
@@ -988,7 +1014,6 @@ public:
     static const char HDR_ENABLE[];
     static const char HDR_DISABLE[];
 
-#if defined(QCOM_HARDWARE) && defined(SAMSUNG_CAMERA_LEGACY)
     static const char FOCUS_MODE_FACEDETECT[];
     static const char FOCUS_MODE_TOUCHAF[];
     static const char ISO_50[];
@@ -1003,12 +1028,14 @@ public:
     static const char VINTAGE_MODE_NORMAL[];
     static const char VINTAGE_MODE_OFF[];
     static const char VINTAGE_MODE_WARM[];
+#ifndef STE_HARDWARE
     static const char SCENE_MODE_DAWN[];
+#else
     static const char SCENE_MODE_DUSKDAWN[];
+#endif
     static const char SCENE_MODE_FALL[];
     static const char SCENE_MODE_FALL_COLOR[];
     static const char SCENE_MODE_TEXT[];
-#endif
 
    // Values for Redeye Reduction settings.
    // static const char REDEYE_REDUCTION_ENABLE[];
