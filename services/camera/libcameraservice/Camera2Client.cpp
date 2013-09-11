@@ -24,6 +24,7 @@
 #include <cutils/properties.h>
 #include <gui/SurfaceTextureClient.h>
 #include <gui/Surface.h>
+#include <system/graphics.h>
 #include "camera2/Parameters.h"
 #include "Camera2Client.h"
 
@@ -1062,11 +1063,7 @@ status_t Camera2Client::cancelAutoFocus() {
     return OK;
 }
 
-#ifdef OMAP_ENHANCEMENT_CPCAM
-status_t Camera2Client::takePicture(int msgType, const String8& params) {
-#else
 status_t Camera2Client::takePicture(int msgType) {
-#endif
     ATRACE_CALL();
     Mutex::Autolock icl(mICameraLock);
     status_t res;
