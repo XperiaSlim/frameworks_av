@@ -21,6 +21,7 @@
 #include <gui/SurfaceTextureClient.h>
 #include <gui/Surface.h>
 
+#include <system/graphics.h>
 #include "CameraClient.h"
 #include "CameraHardwareInterface.h"
 #include "CameraService.h"
@@ -85,7 +86,7 @@ status_t CameraClient::initialize(camera_module_t *module) {
     // Enable zoom, error, focus, and metadata messages by default
     enableMsgType(CAMERA_MSG_ERROR | CAMERA_MSG_ZOOM | CAMERA_MSG_FOCUS
 #ifndef QCOM_HARDWARE
-                  | CAMERA_MSG_PREVIEW_METADATA
+                  | CAMERA_MSG_PREVIEW_METADATA 
 #endif
 #ifndef OMAP_ICS_CAMERA
                   | CAMERA_MSG_FOCUS_MOVE
@@ -549,11 +550,7 @@ status_t CameraClient::cancelAutoFocus() {
 }
 
 // take a picture - image is returned in callback
-#ifdef OMAP_ENHANCEMENT_CPCAM
-status_t CameraClient::takePicture(int msgType, const String8& params) {
-#else
 status_t CameraClient::takePicture(int msgType) {
-#endif
     LOG1("takePicture (pid %d): 0x%x", getCallingPid(), msgType);
 
     Mutex::Autolock lock(mLock);
@@ -588,11 +585,7 @@ status_t CameraClient::takePicture(int msgType) {
 #endif
     enableMsgType(picMsgType);
 
-#ifdef OMAP_ENHANCEMENT_CPCAM
-    return mHardware->takePictureWithParameters(params);
-#else
     return mHardware->takePicture();
-#endif
 }
 
 // set preview/capture parameters - key/value pairs
@@ -705,12 +698,6 @@ void CameraClient::disableMsgType(int32_t msgType) {
 bool CameraClient::lockIfMessageWanted(int32_t msgType) {
     int sleepCount = 0;
     while (mMsgEnabled & msgType) {
-        if ((msgType == CAMERA_MSG_PREVIEW_FRAME) &&
-              (mMsgEnabled & CAMERA_MSG_COMPRESSED_IMAGE)) {
-           LOG1("lockIfMessageWanted(%d): Don't try to acquire mlock if "
-                "both Preview and Compressed are enabled", msgType);
-           return false;
-        }
         if (mLock.tryLock() == NO_ERROR) {
             if (sleepCount > 0) {
                 LOG1("lockIfMessageWanted(%d): waited for %d ms",
