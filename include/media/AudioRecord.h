@@ -210,8 +210,13 @@ public:
             audio_format_t format() const   { return mFormat; }
             uint32_t    channelCount() const    { return mChannelCount; }
             size_t      frameCount() const  { return mFrameCount; }
+#ifdef QCOM_DIRECTTRACK
+            size_t      frameSize() const;
+            audio_source_t inputSource() const;
+#else
             size_t      frameSize() const   { return mFrameSize; }
             audio_source_t inputSource() const  { return mInputSource; }
+#endif
 
     /* After it's created the track is not active. Call start() to
      * make it active. If set, the callback will start being called.
@@ -492,6 +497,10 @@ private:
     sp<AudioRecordClientProxy> mProxy;
 
     bool                    mInOverrun;         // whether recorder is currently in overrun state
+
+#ifdef STE_AUDIO
+    audio_input_clients     *mpInputClientId;
+#endif
 
 private:
     class DeathNotifier : public IBinder::DeathRecipient {

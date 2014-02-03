@@ -86,6 +86,10 @@ struct OMXCodec : public MediaSource,
     // from MediaBufferObserver
     virtual void signalBufferReturned(MediaBuffer *buffer);
 
+#ifdef STE_HARDWARE
+    static uint32_t OmxToHALFormat(OMX_COLOR_FORMATTYPE omxValue);
+#endif
+
     enum Quirks {
         kNeedsFlushBeforeDisable              = 1,
         kWantsNALFragments                    = 2,
@@ -102,6 +106,13 @@ struct OMXCodec : public MediaSource,
         kOutputBuffersAreUnreadable           = 4096,
 #if defined(OMAP_ENHANCEMENT)
         kAvoidMemcopyInputRecordingFrames     = 0x20000000,
+#endif
+#ifdef QCOM_HARDWARE
+        kRequiresGlobalFlush                  = 0x20000000, // 2^29
+        kRequiresWMAProComponent              = 0x40000000, //2^30
+#endif
+#ifdef STE_HARDWARE
+        kRequiresStoreMetaDataBeforeIdle      = 16384,
 #endif
     };
 
@@ -142,10 +153,18 @@ private:
         EXECUTING_TO_IDLE,
         IDLE_TO_LOADED,
         RECONFIGURING,
+#ifdef QCOM_HARDWARE
+        PAUSING,
+        FLUSHING,
+        PAUSED,
+#endif
         ERROR
     };
 
     enum {
+#ifdef QCOM_HARDWARE
+        kPortIndexBoth   = -1,
+#endif
         kPortIndexInput  = 0,
         kPortIndexOutput = 1
     };
@@ -172,6 +191,7 @@ private:
         size_t mSize;
         void *mData;
         MediaBuffer *mMediaBuffer;
+        bool mOutputCropChanged;
     };
 
     struct CodecSpecificData {
@@ -357,6 +377,10 @@ private:
     status_t applyRotation();
     status_t waitForBufferFilled_l();
 
+#ifdef QCOM_HARDWARE
+    status_t resumeLocked(bool drainInputBuf);
+#endif
+
     int64_t getDecodingTimeUs();
 
     status_t parseAVCCodecSpecificData(
@@ -367,6 +391,12 @@ private:
 
     OMXCodec(const OMXCodec &);
     OMXCodec &operator=(const OMXCodec &);
+
+#ifdef QCOM_HARDWARE
+    int32_t mNumBFrames;
+#endif
+    bool mInSmoothStreamingMode;
+    bool mOutputCropChanged;
 };
 
 struct CodecCapabilities {

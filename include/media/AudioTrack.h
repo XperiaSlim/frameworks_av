@@ -1,4 +1,6 @@
 /*
+ * Copyright (c) 2013, The Linux Foundation. All rights reserved.
+ * Not a Contribution.
  * Copyright (C) 2007 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -22,7 +24,10 @@
 #include <media/AudioTimestamp.h>
 #include <media/IAudioTrack.h>
 #include <utils/threads.h>
-
+#ifdef QCOM_DIRECTTRACK
+#include <media/IDirectTrack.h>
+#include <media/IDirectTrackClient.h>
+#endif
 namespace android {
 
 // ----------------------------------------------------------------------------
@@ -33,7 +38,12 @@ class StaticAudioTrackClientProxy;
 
 // ----------------------------------------------------------------------------
 
+#ifdef QCOM_DIRECTTRACK
+class AudioTrack : public BnDirectTrackClient,
+                   virtual public RefBase
+#else
 class AudioTrack : public RefBase
+#endif
 {
 public:
     enum channel_index {
@@ -59,6 +69,9 @@ public:
                                     // (See setPositionUpdatePeriod()).
         EVENT_BUFFER_END = 5,       // Playback head is at the end of the buffer.
                                     // Not currently used by android.media.AudioTrack.
+#ifdef STE_AUDIO
+        EVENT_LATENCY_CHANGED = 6,   // Audio sink latency has changed.
+#endif
         EVENT_NEW_IAUDIOTRACK = 6,  // IAudioTrack was re-created, either due to re-routing and
                                     // voluntary invalidation by mediaserver, or mediaserver crash.
         EVENT_STREAM_END = 7,       // Sent after all the buffers queued in AF and HW are played
@@ -66,6 +79,9 @@ public:
         EVENT_NEW_TIMESTAMP = 8,    // Delivered periodically and when there's a significant change
                                     // in the mapping from frame position to presentation time.
                                     // See AudioTimestamp for the information included with event.
+#ifdef QCOM_DIRECTTRACK
+        EVENT_HW_FAIL = 9,          // ADSP failure.
+#endif
     };
 
     /* Client should declare Buffer on the stack and pass address to obtainBuffer()
@@ -218,9 +234,8 @@ public:
     /* Terminates the AudioTrack and unregisters it from AudioFlinger.
      * Also destroys all resources associated with the AudioTrack.
      */
-protected:
+
                         virtual ~AudioTrack();
-public:
 
     /* Initialize an AudioTrack that was created using the AudioTrack() constructor.
      * Don't call set() more than once, or after the AudioTrack() constructors that take parameters.
@@ -264,7 +279,11 @@ public:
      * This includes the latency due to AudioTrack buffer size, AudioMixer (if any)
      * and audio hardware driver.
      */
+#ifdef QCOM_DIRECTTRACK
+            uint32_t    latency() const;
+#else
             uint32_t    latency() const     { return mLatency; }
+#endif
 
     /* getters, see constructors and set() */
 
@@ -582,7 +601,11 @@ public:
      * consider implementing that at application level, based on the low resolution timestamps.
      * Returns NO_ERROR if timestamp is valid.
      */
-            status_t    getTimestamp(AudioTimestamp& timestamp);
+      virtual status_t    getTimestamp(AudioTimestamp& timestamp);
+#ifdef QCOM_DIRECTTRACK
+      virtual void notify(int msg);
+      virtual status_t    getTimeStamp(uint64_t *tstamp);
+#endif
 
 protected:
     /* copying audio tracks is not allowed */
@@ -650,9 +673,17 @@ protected:
             // FIXME enum is faster than strcmp() for parameter 'from'
             status_t restoreTrack_l(const char *from);
 
+#ifdef STE_AUDIO
+            static void LatencyCallback(void *cookie, audio_io_handle_t output,
+                                 uint32_t sinkLatency);
+#endif
+
             bool     isOffloaded() const
                 { return (mFlags & AUDIO_OUTPUT_FLAG_COMPRESS_OFFLOAD) != 0; }
 
+#ifdef QCOM_DIRECTTRACK
+    sp<IDirectTrack>        mDirectTrack;
+#endif
     // Next 3 fields may be changed if IAudioTrack is re-created, but always != 0
     sp<IAudioTrack>         mAudioTrack;
     sp<IMemory>             mCblkMemory;
@@ -720,15 +751,26 @@ protected:
     uint32_t                mUpdatePeriod;          // in frames, zero means no EVENT_NEW_POS
 
     audio_output_flags_t    mFlags;
+#ifdef QCOM_DIRECTTRACK
+    sp<IAudioFlinger>       mAudioFlinger;
+    audio_io_handle_t       mAudioDirectOutput;
+#endif
     int                     mSessionId;
     int                     mAuxEffectId;
 
     mutable Mutex           mLock;
 
+#ifdef QCOM_DIRECTTRACK
+    void*                   mObserver;
+#endif
     bool                    mIsTimed;
     int                     mPreviousPriority;          // before start()
     SchedPolicy             mPreviousSchedulingGroup;
     bool                    mAwaitBoost;    // thread should wait for priority boost before running
+#ifdef STE_AUDIO
+    int                     mLatencyClientId;
+#endif
+
 
     // The proxy should only be referenced while a lock is held because the proxy isn't
     // multi-thread safe, especially the SingleStateQueue part of the proxy.
