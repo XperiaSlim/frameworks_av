@@ -110,7 +110,7 @@ void SoftMP3::initPorts() {
 void SoftMP3::initDecoder() {
     mConfig->equalizerType = flat;
     mConfig->crcEnabled = false;
-
+    mConfig->samplingRate = mSamplingRate;
     uint32_t memRequirements = pvmp3_decoderMemRequirements();
     mDecoderBuf = malloc(memRequirements);
 
@@ -166,6 +166,21 @@ OMX_ERRORTYPE SoftMP3::internalSetParameter(
             return OMX_ErrorNone;
         }
 
+        case OMX_IndexParamAudioPcm:
+        {
+            const OMX_AUDIO_PARAM_PCMMODETYPE *pcmParams =
+                (const OMX_AUDIO_PARAM_PCMMODETYPE *)params;
+
+            if (pcmParams->nPortIndex != 1) {
+                return OMX_ErrorUndefined;
+            }
+
+            mNumChannels = pcmParams->nChannels;
+            mSamplingRate = pcmParams->nSamplingRate;
+
+            return OMX_ErrorNone;
+        }
+
         default:
             return SimpleSoftOMXComponent::internalSetParameter(index, params);
     }
@@ -191,10 +206,19 @@ void SoftMP3::onQueueFilled(OMX_U32 portIndex) {
             inInfo->mOwnedByUs = false;
             notifyEmptyBufferDone(inHeader);
 
-            // pad the end of the stream with 529 samples, since that many samples
-            // were trimmed off the beginning when decoding started
-            outHeader->nFilledLen = kPVMP3DecoderDelay * mNumChannels * sizeof(int16_t);
-            memset(outHeader->pBuffer, 0, outHeader->nFilledLen);
+            if (!mIsFirst) {
+                // pad the end of the stream with 529 samples, since that many samples
+                // were trimmed off the beginning when decoding started
+                outHeader->nFilledLen =
+                    kPVMP3DecoderDelay * mNumChannels * sizeof(int16_t);
+
+                memset(outHeader->pBuffer, 0, outHeader->nFilledLen);
+            } else {
+                // Since we never discarded frames from the start, we won't have
+                // to add any padding at the end either.
+                outHeader->nFilledLen = 0;
+            }
+
             outHeader->nFlags = OMX_BUFFERFLAG_EOS;
 
             outQueue.erase(outQueue.begin());
@@ -228,10 +252,13 @@ void SoftMP3::onQueueFilled(OMX_U32 portIndex) {
             if (decoderErr != NO_ENOUGH_MAIN_DATA_ERROR
                         && decoderErr != SIDE_INFO_ERROR) {
                 ALOGE("mp3 decoder returned error %d", decoderErr);
-
-                notify(OMX_EventError, OMX_ErrorUndefined, decoderErr, NULL);
-                mSignalledError = true;
-                return;
+                if(decoderErr == SYNCH_LOST_ERROR) {
+                    mConfig->outputFrameSize = kOutputBufferSize / sizeof(int16_t);
+                } else {
+                    notify(OMX_EventError, OMX_ErrorUndefined, decoderErr, NULL);
+                    mSignalledError = true;
+                    return;
+                }
             }
 
             if (mConfig->outputFrameSize == 0) {
@@ -260,8 +287,11 @@ void SoftMP3::onQueueFilled(OMX_U32 portIndex) {
             // The decoder delay is 529 samples, so trim that many samples off
             // the start of the first output buffer. This essentially makes this
             // decoder have zero delay, which the rest of the pipeline assumes.
-            outHeader->nOffset = kPVMP3DecoderDelay * mNumChannels * sizeof(int16_t);
-            outHeader->nFilledLen = mConfig->outputFrameSize * sizeof(int16_t) - outHeader->nOffset;
+            outHeader->nOffset =
+                kPVMP3DecoderDelay * mNumChannels * sizeof(int16_t);
+
+            outHeader->nFilledLen =
+                mConfig->outputFrameSize * sizeof(int16_t) - outHeader->nOffset;
         } else {
             outHeader->nOffset = 0;
             outHeader->nFilledLen = mConfig->outputFrameSize * sizeof(int16_t);
@@ -329,6 +359,13 @@ void SoftMP3::onPortEnableCompleted(OMX_U32 portIndex, bool enabled) {
             break;
         }
     }
+}
+
+void SoftMP3::onReset() {
+    pvmp3_InitDecoder(mConfig, mDecoderBuf);
+    mIsFirst = true;
+    mSignalledError = false;
+    mOutputPortSettingsChange = NONE;
 }
 
 }  // namespace android

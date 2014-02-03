@@ -31,8 +31,8 @@
 #include <media/stagefright/OMXCodec.h>
 #include <media/stagefright/foundation/ADebug.h>
 #include <gui/Surface.h>
-#include <gui/ISurfaceTexture.h>
-#include <gui/SurfaceTextureClient.h>
+#include <gui/IGraphicBufferProducer.h>
+#include <gui/Surface.h>
 
 #include "VideoEditorPreviewController.h"
 #include "DummyAudioSource.h"
@@ -247,9 +247,6 @@ status_t PreviewPlayer::setDataSource_l_jpg() {
     status_t error = mAudioSource->start();
     if (error != OK) {
         ALOGE("Error starting dummy audio source");
-#ifdef QCOM_HARDWARE
-        mAudioSource->stop();
-#endif
         mAudioSource.clear();
         return err;
     }
@@ -263,9 +260,6 @@ status_t PreviewPlayer::setDataSource_l_jpg() {
     setVideoSource(mVideoSource);
     status_t err1 = mVideoSource->start();
     if (err1 != OK) {
-#ifdef QCOM_HARDWARE
-        mVideoSource->stop();
-#endif
         mVideoSource.clear();
         return err;
     }
@@ -731,9 +725,6 @@ status_t PreviewPlayer::initAudioDecoder_l() {
         status_t err = mAudioSource->start();
 
         if (err != OK) {
-#ifdef QCOM_HARDWARE
-            mAudioSource->stop();
-#endif
             mAudioSource.clear();
             return err;
         }
@@ -772,9 +763,6 @@ status_t PreviewPlayer::initVideoDecoder_l(uint32_t flags) {
         status_t err = mVideoSource->start();
 
         if (err != OK) {
-#ifdef QCOM_HARDWARE
-            mVideoSource->stop();
-#endif
             mVideoSource.clear();
             return err;
         }
@@ -796,13 +784,6 @@ void PreviewPlayer::onVideoEvent() {
         return;
     }
     mVideoEventPending = false;
-
-#ifdef QCOM_HARDWARE
-    if (mVideoSource == NULL) {
-        ALOGE("VideoSource is null, returning from onVideoEvent\n");
-        return;
-    }
-#endif
 
     if (mFlags & SEEK_PREVIEW) {
         mFlags &= ~SEEK_PREVIEW;
@@ -1218,9 +1199,6 @@ void PreviewPlayer::onPrepareAsyncEvent() {
         status_t err = finishSetDataSource_l();
 
         if (err != OK) {
-#ifdef QCOM_HARDWARE
-            mPrepareResult = err;
-#endif
             abortPrepare(err);
             return;
         }
@@ -1230,10 +1208,7 @@ void PreviewPlayer::onPrepareAsyncEvent() {
         status_t err = initVideoDecoder_l(OMXCodec::kHardwareCodecsOnly);
 
         if (err != OK) {
-            mPrepareResult = err;
-#ifdef QCOM_HARDWARE
             abortPrepare(err);
-#endif
             return;
         }
     }
@@ -1242,9 +1217,6 @@ void PreviewPlayer::onPrepareAsyncEvent() {
         status_t err = initAudioDecoder_l();
 
         if (err != OK) {
-#ifdef QCOM_HARDWARE
-            mPrepareResult = err;
-#endif
             abortPrepare(err);
             return;
         }
@@ -1490,13 +1462,6 @@ status_t PreviewPlayer::setImageClipProperties(uint32_t width,uint32_t height) {
 
 status_t PreviewPlayer::readFirstVideoFrame() {
     ALOGV("readFirstVideoFrame");
-
-#ifdef QCOM_HARDWARE
-    if (mVideoSource == NULL) {
-        ALOGE("VideoSource is null, returning from readFirstVideoFrame\n");
-        return UNKNOWN_ERROR;
-    }
-#endif
 
     if (!mVideoBuffer) {
         MediaSource::ReadOptions options;
@@ -1810,12 +1775,12 @@ void PreviewPlayer::setSurface(const sp<Surface> &surface) {
     setNativeWindow_l(surface);
 }
 
-void PreviewPlayer::setSurfaceTexture(const sp<ISurfaceTexture> &surfaceTexture) {
+void PreviewPlayer::setSurfaceTexture(const sp<IGraphicBufferProducer> &bufferProducer) {
     Mutex::Autolock autoLock(mLock);
 
     mSurface.clear();
-    if (surfaceTexture != NULL) {
-        setNativeWindow_l(new SurfaceTextureClient(surfaceTexture));
+    if (bufferProducer != NULL) {
+        setNativeWindow_l(new Surface(bufferProducer));
     }
 }
 

@@ -40,13 +40,7 @@ struct ChromiumHTTPDataSource : public HTTPBase {
     virtual status_t initCheck() const;
 
     virtual ssize_t readAt(off64_t offset, void *data, size_t size);
-
     virtual status_t getSize(off64_t *size);
-
-#ifdef QCOM_HARDWARE
-    virtual status_t getCurrentOffset(off64_t *size);
-#endif
-
     virtual uint32_t flags();
 
     virtual sp<DecryptHandle> DrmInitialization(const char *mime);
@@ -58,6 +52,9 @@ struct ChromiumHTTPDataSource : public HTTPBase {
     virtual String8 getMIMEType() const;
 
     virtual status_t reconnectAtOffset(off64_t offset);
+
+    static status_t UpdateProxyConfig(
+            const char *host, int32_t port, const char *exclusionList);
 
 protected:
     virtual ~ChromiumHTTPDataSource();

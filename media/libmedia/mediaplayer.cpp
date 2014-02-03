@@ -1,7 +1,6 @@
 /*
 **
 ** Copyright 2006, The Android Open Source Project
-** Copyright (c) 2012, Code Aurora Forum. All rights reserved.
 **
 ** Licensed under the Apache License, Version 2.0 (the "License");
 ** you may not use this file except in compliance with the License.
@@ -28,7 +27,7 @@
 #include <binder/IServiceManager.h>
 #include <binder/IPCThreadState.h>
 
-#include <gui/SurfaceTextureClient.h>
+#include <gui/Surface.h>
 
 #include <media/mediaplayer.h>
 #include <media/AudioSystem.h>
@@ -48,7 +47,6 @@ MediaPlayer::MediaPlayer()
     ALOGV("constructor");
     mListener = NULL;
     mCookie = NULL;
-    mDuration = -1;
     mStreamType = AUDIO_STREAM_MUSIC;
     mCurrentPosition = -1;
     mSeekPosition = -1;
@@ -91,7 +89,6 @@ void MediaPlayer::disconnect()
 // always call with lock held
 void MediaPlayer::clear_l()
 {
-    mDuration = -1;
     mCurrentPosition = -1;
     mSeekPosition = -1;
     mVideoWidth = mVideoHeight = 0;
@@ -127,7 +124,7 @@ status_t MediaPlayer::attachNewPlayer(const sp<IMediaPlayer>& player)
             mCurrentState = MEDIA_PLAYER_INITIALIZED;
             err = NO_ERROR;
         } else {
-            ALOGE("Unable to to create media player");
+            ALOGE("Unable to create media player");
         }
     }
 
@@ -146,7 +143,7 @@ status_t MediaPlayer::setDataSource(
     if (url != NULL) {
         const sp<IMediaPlayerService>& service(getMediaPlayerService());
         if (service != 0) {
-            sp<IMediaPlayer> player(service->create(getpid(), this, mAudioSessionId));
+            sp<IMediaPlayer> player(service->create(this, mAudioSessionId));
             if ((NO_ERROR != doSetRetransmitEndpoint(player)) ||
                 (NO_ERROR != player->setDataSource(url, headers))) {
                 player.clear();
@@ -163,7 +160,7 @@ status_t MediaPlayer::setDataSource(int fd, int64_t offset, int64_t length)
     status_t err = UNKNOWN_ERROR;
     const sp<IMediaPlayerService>& service(getMediaPlayerService());
     if (service != 0) {
-        sp<IMediaPlayer> player(service->create(getpid(), this, mAudioSessionId));
+        sp<IMediaPlayer> player(service->create(this, mAudioSessionId));
         if ((NO_ERROR != doSetRetransmitEndpoint(player)) ||
             (NO_ERROR != player->setDataSource(fd, offset, length))) {
             player.clear();
@@ -179,7 +176,7 @@ status_t MediaPlayer::setDataSource(const sp<IStreamSource> &source)
     status_t err = UNKNOWN_ERROR;
     const sp<IMediaPlayerService>& service(getMediaPlayerService());
     if (service != 0) {
-        sp<IMediaPlayer> player(service->create(getpid(), this, mAudioSessionId));
+        sp<IMediaPlayer> player(service->create(this, mAudioSessionId));
         if ((NO_ERROR != doSetRetransmitEndpoint(player)) ||
             (NO_ERROR != player->setDataSource(source))) {
             player.clear();
@@ -224,12 +221,12 @@ status_t MediaPlayer::getMetadata(bool update_only, bool apply_filter, Parcel *m
 }
 
 status_t MediaPlayer::setVideoSurfaceTexture(
-        const sp<ISurfaceTexture>& surfaceTexture)
+        const sp<IGraphicBufferProducer>& bufferProducer)
 {
     ALOGV("setVideoSurfaceTexture");
     Mutex::Autolock _l(mLock);
     if (mPlayer == 0) return NO_INIT;
-    return mPlayer->setVideoSurfaceTexture(surfaceTexture);
+    return mPlayer->setVideoSurfaceTexture(bufferProducer);
 }
 
 // must call with lock held
@@ -396,14 +393,21 @@ status_t MediaPlayer::getCurrentPosition(int *msec)
 
 status_t MediaPlayer::getDuration_l(int *msec)
 {
-    ALOGV("getDuration");
+    ALOGV("getDuration_l");
     bool isValidState = (mCurrentState & (MEDIA_PLAYER_PREPARED | MEDIA_PLAYER_STARTED | MEDIA_PLAYER_PAUSED | MEDIA_PLAYER_STOPPED | MEDIA_PLAYER_PLAYBACK_COMPLETE));
     if (mPlayer != 0 && isValidState) {
-        status_t ret = NO_ERROR;
-        if (mDuration <= 0)
-            ret = mPlayer->getDuration(&mDuration);
-        if (msec)
-            *msec = mDuration;
+        int durationMs;
+        status_t ret = mPlayer->getDuration(&durationMs);
+
+        if (ret != OK) {
+            // Do not enter error state just because no duration was available.
+            durationMs = -1;
+            ret = OK;
+        }
+
+        if (msec) {
+            *msec = durationMs;
+        }
         return ret;
     }
     ALOGE("Attempt to call getDuration without a valid mediaplayer");
@@ -423,14 +427,28 @@ status_t MediaPlayer::seekTo_l(int msec)
         if ( msec < 0 ) {
             ALOGW("Attempt to seek to invalid position: %d", msec);
             msec = 0;
-        } else if ((mDuration > 0) && (msec > mDuration)) {
-            ALOGW("Attempt to seek to past end of file: request = %d, EOF = %d", msec, mDuration);
-            msec = mDuration;
         }
+
+        int durationMs;
+        status_t err = mPlayer->getDuration(&durationMs);
+
+        if (err != OK) {
+            ALOGW("Stream has no duration and is therefore not seekable.");
+            return err;
+        }
+
+        if (msec > durationMs) {
+            ALOGW("Attempt to seek to past end of file: request = %d, "
+                  "durationMs = %d",
+                  msec,
+                  durationMs);
+
+            msec = durationMs;
+        }
+
         // cache duration
         mCurrentPosition = msec;
         if (mSeekPosition < 0) {
-            getDuration_l(NULL);
             mSeekPosition = msec;
             return mPlayer->seekTo(msec);
         }
@@ -557,8 +575,8 @@ status_t MediaPlayer::setAudioSessionId(int sessionId)
         return BAD_VALUE;
     }
     if (sessionId != mAudioSessionId) {
-        AudioSystem::releaseAudioSessionId(mAudioSessionId);
         AudioSystem::acquireAudioSessionId(sessionId);
+        AudioSystem::releaseAudioSessionId(mAudioSessionId);
         mAudioSessionId = sessionId;
     }
     return NO_ERROR;
@@ -698,13 +716,6 @@ void MediaPlayer::notify(int msg, int ext1, int ext2, const Parcel *obj)
         // ext1: Media framework error code.
         // ext2: Implementation dependant error code.
         ALOGE("error (%d, %d)", ext1, ext2);
-#ifdef QCOM_HARDWARE
-        if ( ext1 == MEDIA_ERROR_SERVER_DIED ) {
-            ALOGE("Mediaserver died in %d state",mCurrentState);
-            mAudioSessionId = AudioSystem::newAudioSessionId();
-            AudioSystem::acquireAudioSessionId(mAudioSessionId);
-        }
-#endif
         mCurrentState = MEDIA_PLAYER_STATE_ERROR;
         if (mPrepareSync)
         {
@@ -745,6 +756,9 @@ void MediaPlayer::notify(int msg, int ext1, int ext2, const Parcel *obj)
     case MEDIA_TIMED_TEXT:
         ALOGV("Received timed text message");
         break;
+    case MEDIA_SUBTITLE_DATA:
+        ALOGV("Received subtitle data message");
+        break;
     default:
         ALOGV("unrecognized message: (%d, %d, %d)", msg, ext1, ext2);
         break;
@@ -762,17 +776,20 @@ void MediaPlayer::notify(int msg, int ext1, int ext2, const Parcel *obj)
     }
 }
 
-/*static*/ sp<IMemory> MediaPlayer::decode(const char* url, uint32_t *pSampleRate, int* pNumChannels, audio_format_t* pFormat)
+/*static*/ status_t MediaPlayer::decode(const char* url, uint32_t *pSampleRate,
+                                           int* pNumChannels, audio_format_t* pFormat,
+                                           const sp<IMemoryHeap>& heap, size_t *pSize)
 {
     ALOGV("decode(%s)", url);
-    sp<IMemory> p;
+    status_t status;
     const sp<IMediaPlayerService>& service = getMediaPlayerService();
     if (service != 0) {
-        p = service->decode(url, pSampleRate, pNumChannels, pFormat);
+        status = service->decode(url, pSampleRate, pNumChannels, pFormat, heap, pSize);
     } else {
         ALOGE("Unable to locate media service");
+        status = DEAD_OBJECT;
     }
-    return p;
+    return status;
 
 }
 
@@ -782,17 +799,22 @@ void MediaPlayer::died()
     notify(MEDIA_ERROR, MEDIA_ERROR_SERVER_DIED, 0);
 }
 
-/*static*/ sp<IMemory> MediaPlayer::decode(int fd, int64_t offset, int64_t length, uint32_t *pSampleRate, int* pNumChannels, audio_format_t* pFormat)
+/*static*/ status_t MediaPlayer::decode(int fd, int64_t offset, int64_t length,
+                                        uint32_t *pSampleRate, int* pNumChannels,
+                                        audio_format_t* pFormat,
+                                        const sp<IMemoryHeap>& heap, size_t *pSize)
 {
     ALOGV("decode(%d, %lld, %lld)", fd, offset, length);
-    sp<IMemory> p;
+    status_t status;
     const sp<IMediaPlayerService>& service = getMediaPlayerService();
     if (service != 0) {
-        p = service->decode(fd, offset, length, pSampleRate, pNumChannels, pFormat);
+        status = service->decode(fd, offset, length, pSampleRate,
+                                 pNumChannels, pFormat, heap, pSize);
     } else {
         ALOGE("Unable to locate media service");
+        status = DEAD_OBJECT;
     }
-    return p;
+    return status;
 
 }
 
@@ -800,7 +822,32 @@ status_t MediaPlayer::setNextMediaPlayer(const sp<MediaPlayer>& next) {
     if (mPlayer == NULL) {
         return NO_INIT;
     }
+
+    if (next != NULL && !(next->mCurrentState &
+            (MEDIA_PLAYER_PREPARED | MEDIA_PLAYER_PAUSED | MEDIA_PLAYER_PLAYBACK_COMPLETE))) {
+        ALOGE("next player is not prepared");
+        return INVALID_OPERATION;
+    }
+
     return mPlayer->setNextPlayer(next == NULL ? NULL : next->mPlayer);
 }
+
+status_t MediaPlayer::updateProxyConfig(
+        const char *host, int32_t port, const char *exclusionList) {
+    const sp<IMediaPlayerService>& service = getMediaPlayerService();
+
+    if (service != NULL) {
+        return service->updateProxyConfig(host, port, exclusionList);
+    }
+
+    return INVALID_OPERATION;
+}
+
+#ifdef SAMSUNG_CAMERA_LEGACY
+extern "C" int _ZN7android11MediaPlayer18setAudioStreamTypeE19audio_stream_type_t();
+extern "C" int _ZN7android11MediaPlayer18setAudioStreamTypeEi() {
+    return _ZN7android11MediaPlayer18setAudioStreamTypeE19audio_stream_type_t();
+}
+#endif
 
 }; // namespace android

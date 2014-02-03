@@ -32,11 +32,9 @@
 #include <media/stagefright/foundation/ADebug.h>
 #include <media/stagefright/MetaData.h>
 #include <media/stagefright/MediaDefs.h>
-
 /********************
  *   DEFINITIONS    *
  ********************/
-
 #define MAX_DEC_BUFFERS 10
 
 /********************
@@ -829,11 +827,16 @@ M4OSA_ERR VideoEditorVideoDecoder_configureFromMetadata(M4OSA_Context pContext,
 
     pDecShellContext->mCropRect.left = cropLeft;
     pDecShellContext->mCropRect.right = cropRight;
+#ifdef QCOM_HARDWARE
     pDecShellContext->mCropRect.top = cropTop;
     pDecShellContext->mCropRect.bottom = cropBottom;
-
+#else
     width = cropRight - cropLeft + 1;
     height = cropBottom - cropTop + 1;
+#endif
+
+    width = vWidth;
+    height = vHeight;
 
     ALOGV("VideoDecoder_configureFromMetadata : W=%d H=%d", width, height);
     VIDEOEDITOR_CHECK((0 != width) && (0 != height), M4ERR_PARAMETER);
@@ -851,6 +854,7 @@ M4OSA_ERR VideoEditorVideoDecoder_configureFromMetadata(M4OSA_Context pContext,
     pDecShellContext->m_pVideoStreamhandler->m_videoWidth  = width;
     pDecShellContext->m_pVideoStreamhandler->m_videoHeight = height;
     frameSize = (width * height * 3) / 2;
+
     // Configure the buffer pool
     if( M4OSA_NULL != pDecShellContext->m_pDecBufferPool ) {
         ALOGV("VideoDecoder_configureFromMetadata : reset the buffer pool");
@@ -861,11 +865,8 @@ M4OSA_ERR VideoEditorVideoDecoder_configureFromMetadata(M4OSA_Context pContext,
         MAX_DEC_BUFFERS, (M4OSA_Char*)"VIDEOEDITOR_DecodedBufferPool");
     VIDEOEDITOR_CHECK(M4NO_ERROR == err, err);
     err = VIDEOEDITOR_BUFFER_initPoolBuffers(pDecShellContext->m_pDecBufferPool,
-#ifdef QCOM_HARDWARE
-                    frameSize);
-#else
                 frameSize + pDecShellContext->mGivenWidth * 2);
-#endif
+
     VIDEOEDITOR_CHECK(M4NO_ERROR == err, err);
 
 cleanUp:
@@ -892,9 +893,7 @@ M4OSA_ERR VideoEditorVideoDecoder_destroy(M4OSA_Context pContext) {
     VIDEOEDITOR_CHECK(M4OSA_NULL != pContext, M4ERR_PARAMETER);
 
     // Release the color converter
-    if (pDecShellContext->mI420ColorConverter) {
-        delete pDecShellContext->mI420ColorConverter;
-    }
+    delete pDecShellContext->mI420ColorConverter;
 
     // Destroy the graph
     if( pDecShellContext->mVideoDecoder != NULL ) {
@@ -1043,6 +1042,7 @@ M4OSA_ERR VideoEditorVideoDecoder_create(M4OSA_Context *pContext,
     VIDEOEDITOR_CHECK(NULL != pDecShellContext->mVideoDecoder.get(),
         M4ERR_SF_DECODER_RSRC_FAIL);
 
+
     // Get the output color format
     success = pDecShellContext->mVideoDecoder->getFormat()->findInt32(
         kKeyColorFormat, &colorFormat);
@@ -1087,7 +1087,6 @@ cleanUp:
         ALOGV("VideoEditorVideoDecoder_create ERROR 0x%X", err);
     }
     ALOGV("VideoEditorVideoDecoder_create : DONE");
-
     return err;
 }
 
@@ -1154,6 +1153,12 @@ M4OSA_ERR VideoEditorVideoSoftwareDecoder_create(M4OSA_Context *pContext,
     pDecShellContext->mFirstOutputCts    = -1;
     pDecShellContext->mLastOutputCts     = -1;
     pDecShellContext->m_pDecBufferPool   = M4OSA_NULL;
+
+    // Calculate the interval between two video frames.
+    if(pDecShellContext->m_pVideoStreamhandler->m_averageFrameRate > 0){
+        pDecShellContext->mFrameIntervalMs =
+            1000.0 / pDecShellContext->m_pVideoStreamhandler->m_averageFrameRate;
+    }
 
     /**
      * StageFright graph building
@@ -1500,11 +1505,7 @@ static M4OSA_ERR copyBufferToQueue(
     // Color convert or copy from the given MediaBuffer to our buffer
     if (pDecShellContext->mI420ColorConverter) {
         if (pDecShellContext->mI420ColorConverter->convertDecoderOutputToI420(
-#ifdef QCOM_HARDWARE
-            (uint8_t *)pDecoderBuffer->data() + pDecoderBuffer->range_offset(),   // decoderBits
-#else
             (uint8_t *)pDecoderBuffer->data(),// ?? + pDecoderBuffer->range_offset(),   // decoderBits
-#endif
             pDecShellContext->mGivenWidth,  // decoderWidth
             pDecShellContext->mGivenHeight,  // decoderHeight
             pDecShellContext->mCropRect,  // decoderRect
@@ -1566,10 +1567,6 @@ static M4OSA_ERR copyBufferToQueue(
     } else {
         ALOGE("VideoDecoder_decode: unexpected color format 0x%X",
             pDecShellContext->decOuputColorFormat);
-        if (pDecoderBuffer != NULL) {
-            pDecoderBuffer->release();
-            pDecoderBuffer = NULL;
-        }
         lerr = M4ERR_PARAMETER;
     }
 

@@ -25,6 +25,8 @@
 #include <media/stagefright/SkipCutBuffer.h>
 #include <OMX_Audio.h>
 
+#define TRACK_BUFFER_TIMING     0
+
 namespace android {
 
 struct ABuffer;
@@ -41,7 +43,10 @@ struct ACodec : public AHierarchicalStateMachine {
         kWhatError               = 'erro',
         kWhatComponentAllocated  = 'cAll',
         kWhatComponentConfigured = 'cCon',
+        kWhatInputSurfaceCreated = 'isfc',
+        kWhatSignaledInputEOS    = 'seos',
         kWhatBuffersAllocated    = 'allc',
+        kWhatOMXDied             = 'OMXd',
     };
 
     ACodec();
@@ -52,9 +57,15 @@ struct ACodec : public AHierarchicalStateMachine {
     void signalResume();
     void initiateShutdown(bool keepComponentAllocated = false);
 
+    void signalSetParameters(const sp<AMessage> &msg);
+    void signalEndOfInputStream();
+
     void initiateAllocateComponent(const sp<AMessage> &msg);
     void initiateConfigureComponent(const sp<AMessage> &msg);
+    void initiateCreateInputSurface();
     void initiateStart();
+
+    void signalRequestIDRFrame();
 
     struct PortDescription : public RefBase {
         size_t countBuffers();
@@ -87,9 +98,7 @@ private:
     struct ExecutingToIdleState;
     struct IdleToLoadedState;
     struct FlushingState;
-#ifdef QCOM_HARDWARE
-    struct FlushingOutputState;
-#endif
+    struct DeathNotifier;
 
     enum {
         kWhatSetup                   = 'setu',
@@ -102,7 +111,12 @@ private:
         kWhatDrainDeferredMessages   = 'drai',
         kWhatAllocateComponent       = 'allo',
         kWhatConfigureComponent      = 'conf',
+        kWhatCreateInputSurface      = 'cisf',
+        kWhatSignalEndOfInputStream  = 'eois',
         kWhatStart                   = 'star',
+        kWhatRequestIDRFrame         = 'ridr',
+        kWhatSetParameters           = 'setP',
+        kWhatSubmitOutputMetaDataBufferIfEOS = 'subm',
     };
 
     enum {
@@ -111,7 +125,8 @@ private:
     };
 
     enum {
-        kFlagIsSecure   = 1,
+        kFlagIsSecure                                 = 1,
+        kFlagPushBlankBuffersToNativeWindowOnShutdown = 2,
     };
 
     struct BufferInfo {
@@ -125,10 +140,20 @@ private:
 
         IOMX::buffer_id mBufferID;
         Status mStatus;
+        unsigned mDequeuedAt;
 
         sp<ABuffer> mData;
         sp<GraphicBuffer> mGraphicBuffer;
     };
+
+#if TRACK_BUFFER_TIMING
+    struct BufferStats {
+        int64_t mEmptyBufferTimeUs;
+        int64_t mFillBufferDoneTimeUs;
+    };
+
+    KeyedVector<int64_t, BufferStats> mBufferStats;
+#endif
 
     sp<AMessage> mNotify;
 
@@ -160,7 +185,7 @@ private:
 
     bool mSentFormat;
     bool mIsEncoder;
-
+    bool mUseMetadataOnEncoderOutput;
     bool mShutdownInProgress;
 
     // If "mKeepComponentAllocated" we only transition back to Loaded state
@@ -172,13 +197,25 @@ private:
 
     bool mChannelMaskPresent;
     int32_t mChannelMask;
+    unsigned mDequeueCounter;
+    bool mStoreMetaDataInOutputBuffers;
+    int32_t mMetaDataBuffersToSubmit;
 
+    int64_t mRepeatFrameDelayUs;
+
+    status_t setCyclicIntraMacroblockRefresh(const sp<AMessage> &msg, int32_t mode);
     status_t allocateBuffersOnPort(OMX_U32 portIndex);
     status_t freeBuffersOnPort(OMX_U32 portIndex);
     status_t freeBuffer(OMX_U32 portIndex, size_t i);
 
+    status_t configureOutputBuffersFromNativeWindow(
+            OMX_U32 *nBufferCount, OMX_U32 *nBufferSize,
+            OMX_U32 *nMinUndequeuedBuffers);
+    status_t allocateOutputMetaDataBuffers();
+    status_t submitOutputMetaDataBuffer();
+    void signalSubmitOutputMetaDataBufferIfEOS_workaround();
     status_t allocateOutputBuffersFromNativeWindow();
-#ifdef EXYNOS4_ENHANCEMENTS
+#ifdef USE_SAMSUNG_COLORFORMAT
     void setNativeWindowColorFormat(OMX_COLOR_FORMATTYPE &eNativeColorFormat);
 #endif
     status_t cancelBufferToNativeWindow(BufferInfo *info);
@@ -232,34 +269,45 @@ private:
     status_t setupMPEG4EncoderParameters(const sp<AMessage> &msg);
     status_t setupH263EncoderParameters(const sp<AMessage> &msg);
     status_t setupAVCEncoderParameters(const sp<AMessage> &msg);
+    status_t setupVPXEncoderParameters(const sp<AMessage> &msg);
 
     status_t verifySupportForProfileAndLevel(int32_t profile, int32_t level);
-    status_t configureBitrate(int32_t bitrate);
+
+    status_t configureBitrate(
+            int32_t bitrate, OMX_VIDEO_CONTROLRATETYPE bitrateMode);
+
     status_t setupErrorCorrectionParameters();
 
     status_t initNativeWindow();
 
     status_t pushBlankBuffersToNativeWindow();
 
-    // Returns true iff all buffers on the given port have status OWNED_BY_US.
+    // Returns true iff all buffers on the given port have status
+    // OWNED_BY_US or OWNED_BY_NATIVE_WINDOW.
     bool allYourBuffersAreBelongToUs(OMX_U32 portIndex);
 
     bool allYourBuffersAreBelongToUs();
 
+    void waitUntilAllPossibleNativeWindowBuffersAreReturnedToUs();
+
     size_t countBuffersOwnedByComponent(OMX_U32 portIndex) const;
+    size_t countBuffersOwnedByNativeWindow() const;
 
     void deferMessage(const sp<AMessage> &msg);
     void processDeferredMessages();
 
-    void sendFormatChange();
+    void sendFormatChange(const sp<AMessage> &reply);
 
     void signalError(
             OMX_ERRORTYPE error = OMX_ErrorUndefined,
             status_t internalError = UNKNOWN_ERROR);
 
-#ifdef QCOM_HARDWARE
-    sp<FlushingOutputState> mFlushingOutputState;
-#endif
+    status_t requestIDRFrame();
+    status_t setParameters(const sp<AMessage> &params);
+
+    // Send EOS on input stream.
+    void onSignalEndOfInputStream();
+
     DISALLOW_EVIL_CONSTRUCTORS(ACodec);
 };
 

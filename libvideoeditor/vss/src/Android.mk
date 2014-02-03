@@ -57,6 +57,7 @@ LOCAL_SHARED_LIBRARIES :=       \
     libaudioutils               \
     libbinder                   \
     libcutils                   \
+    liblog                      \
     libmedia                    \
     libstagefright              \
     libstagefright_foundation   \
@@ -82,8 +83,8 @@ LOCAL_C_INCLUDES += \
     $(TOP)/frameworks/native/include/media/openmax \
     $(TOP)/frameworks/native/services/audioflinger \
     $(TOP)/system/media/audio_effects/include \
-    $(TOP)/system/media/audio_utils/include \
-    $(TOP)/vendor/qcom/opensource/omx/mm-core/omxcore/inc
+    $(TOP)/system/media/audio_utils/include
+
 
 LOCAL_SHARED_LIBRARIES += libdl
 
@@ -96,4 +97,3 @@ LOCAL_CFLAGS += -Wno-multichar \
     -DDECODE_GIF_ON_SAVING
 
 include $(BUILD_SHARED_LIBRARY)
-

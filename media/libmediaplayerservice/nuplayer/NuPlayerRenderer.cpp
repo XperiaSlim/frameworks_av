@@ -31,9 +31,11 @@ const int64_t NuPlayer::Renderer::kMinPositionUpdateDelayUs = 100000ll;
 
 NuPlayer::Renderer::Renderer(
         const sp<MediaPlayerBase::AudioSink> &sink,
-        const sp<AMessage> &notify)
+        const sp<AMessage> &notify,
+        uint32_t flags)
     : mAudioSink(sink),
       mNotify(notify),
+      mFlags(flags),
       mNumFramesWritten(0),
       mDrainAudioQueuePending(false),
       mDrainVideoQueuePending(false),
@@ -47,9 +49,9 @@ NuPlayer::Renderer::Renderer(
       mHasVideo(false),
       mSyncQueues(false),
       mPaused(false),
-#ifdef QCOM_HARDWARE
-      mWasPaused(false),
-#endif
+      mVideoRenderingStarted(false),
+      mVideoRenderingStartGeneration(0),
+      mAudioRenderingStartGeneration(0),
       mLastPositionUpdateUs(-1ll),
       mVideoLateByUs(0ll) {
 }
@@ -70,11 +72,6 @@ void NuPlayer::Renderer::queueBuffer(
 
 void NuPlayer::Renderer::queueEOS(bool audio, status_t finalResult) {
     CHECK_NE(finalResult, (status_t)OK);
-
-#ifdef QCOM_HARDWARE
-    if(mSyncQueues)
-      syncQueuesDone();
-#endif
 
     sp<AMessage> msg = new AMessage(kWhatQueueEOS, id());
     msg->setInt32("audio", static_cast<int32_t>(audio));
@@ -100,14 +97,11 @@ void NuPlayer::Renderer::flush(bool audio) {
 }
 
 void NuPlayer::Renderer::signalTimeDiscontinuity() {
-    CHECK(mAudioQueue.empty());
-    CHECK(mVideoQueue.empty());
+    // CHECK(mAudioQueue.empty());
+    // CHECK(mVideoQueue.empty());
     mAnchorTimeMediaUs = -1;
     mAnchorTimeRealUs = -1;
-#ifdef QCOM_HARDWARE
-    mWasPaused = false;
-#endif
-    mSyncQueues = mHasAudio && mHasVideo;
+    mSyncQueues = false;
 }
 
 void NuPlayer::Renderer::pause() {
@@ -228,6 +222,23 @@ void NuPlayer::Renderer::signalAudioSinkChanged() {
     (new AMessage(kWhatAudioSinkChanged, id()))->post();
 }
 
+void NuPlayer::Renderer::prepareForMediaRenderingStart() {
+    mAudioRenderingStartGeneration = mAudioQueueGeneration;
+    mVideoRenderingStartGeneration = mVideoQueueGeneration;
+}
+
+void NuPlayer::Renderer::notifyIfMediaRenderingStarted() {
+    if (mVideoRenderingStartGeneration == mVideoQueueGeneration &&
+        mAudioRenderingStartGeneration == mAudioQueueGeneration) {
+        mVideoRenderingStartGeneration = -1;
+        mAudioRenderingStartGeneration = -1;
+
+        sp<AMessage> notify = mNotify->dup();
+        notify->setInt32("what", kWhatMediaRenderingStart);
+        notify->post();
+    }
+}
+
 bool NuPlayer::Renderer::onDrainAudioQueue() {
     uint32_t numFramesPlayed;
     if (mAudioSink->getPosition(&numFramesPlayed) != OK) {
@@ -307,6 +318,8 @@ bool NuPlayer::Renderer::onDrainAudioQueue() {
         numBytesAvailableToWrite -= copy;
         size_t copiedFrames = copy / mAudioSink->frameSize();
         mNumFramesWritten += copiedFrames;
+
+        notifyIfMediaRenderingStarted();
     }
 
     notifyPosition();
@@ -333,6 +346,11 @@ void NuPlayer::Renderer::postDrainVideoQueue() {
     if (entry.mBuffer == NULL) {
         // EOS doesn't carry a timestamp.
         delayUs = 0;
+    } else if (mFlags & FLAG_REAL_TIME) {
+        int64_t mediaTimeUs;
+        CHECK(entry.mBuffer->meta()->findInt64("timeUs", &mediaTimeUs));
+
+        delayUs = mediaTimeUs - ALooper::GetNowUs();
     } else {
         int64_t mediaTimeUs;
         CHECK(entry.mBuffer->meta()->findInt64("timeUs", &mediaTimeUs));
@@ -345,15 +363,6 @@ void NuPlayer::Renderer::postDrainVideoQueue() {
                 mAnchorTimeRealUs = ALooper::GetNowUs();
             }
         } else {
-#ifdef QCOM_HARDWARE
-            if ( (!mHasAudio && mHasVideo) && (mWasPaused == true))
-            {
-               mAnchorTimeMediaUs = mediaTimeUs;
-               mAnchorTimeRealUs = ALooper::GetNowUs();
-               mWasPaused = false;
-            }
-#endif
-
             int64_t realTimeUs =
                 (mediaTimeUs - mAnchorTimeMediaUs) + mAnchorTimeRealUs;
 
@@ -387,12 +396,17 @@ void NuPlayer::Renderer::onDrainVideoQueue() {
         return;
     }
 
-    int64_t mediaTimeUs;
-    CHECK(entry->mBuffer->meta()->findInt64("timeUs", &mediaTimeUs));
+    int64_t realTimeUs;
+    if (mFlags & FLAG_REAL_TIME) {
+        CHECK(entry->mBuffer->meta()->findInt64("timeUs", &realTimeUs));
+    } else {
+        int64_t mediaTimeUs;
+        CHECK(entry->mBuffer->meta()->findInt64("timeUs", &mediaTimeUs));
 
-    int64_t realTimeUs = mediaTimeUs - mAnchorTimeMediaUs + mAnchorTimeRealUs;
+        realTimeUs = mediaTimeUs - mAnchorTimeMediaUs + mAnchorTimeRealUs;
+    }
+
     mVideoLateByUs = ALooper::GetNowUs() - realTimeUs;
-
     bool tooLate = (mVideoLateByUs > 40000);
 
     if (tooLate) {
@@ -407,7 +421,20 @@ void NuPlayer::Renderer::onDrainVideoQueue() {
     mVideoQueue.erase(mVideoQueue.begin());
     entry = NULL;
 
+    if (!mVideoRenderingStarted) {
+        mVideoRenderingStarted = true;
+        notifyVideoRenderingStart();
+    }
+
+    notifyIfMediaRenderingStarted();
+
     notifyPosition();
+}
+
+void NuPlayer::Renderer::notifyVideoRenderingStart() {
+    sp<AMessage> notify = mNotify->dup();
+    notify->setInt32("what", kWhatVideoRenderingStart);
+    notify->post();
 }
 
 void NuPlayer::Renderer::notifyEOS(bool audio, status_t finalResult) {
@@ -520,9 +547,15 @@ void NuPlayer::Renderer::onQueueEOS(const sp<AMessage> &msg) {
     entry.mFinalResult = finalResult;
 
     if (audio) {
+        if (mAudioQueue.empty() && mSyncQueues) {
+            syncQueuesDone();
+        }
         mAudioQueue.push_back(entry);
         postDrainAudioQueue();
     } else {
+        if (mVideoQueue.empty() && mSyncQueues) {
+            syncQueuesDone();
+        }
         mVideoQueue.push_back(entry);
         postDrainVideoQueue();
     }
@@ -542,6 +575,7 @@ void NuPlayer::Renderer::onFlush(const sp<AMessage> &msg) {
     // is flushed.
     syncQueuesDone();
 
+    ALOGV("flushing %s", audio ? "audio" : "video");
     if (audio) {
         flushQueue(&mAudioQueue);
 
@@ -550,6 +584,8 @@ void NuPlayer::Renderer::onFlush(const sp<AMessage> &msg) {
 
         mDrainAudioQueuePending = false;
         ++mAudioQueueGeneration;
+
+        prepareForMediaRenderingStart();
     } else {
         flushQueue(&mVideoQueue);
 
@@ -558,6 +594,8 @@ void NuPlayer::Renderer::onFlush(const sp<AMessage> &msg) {
 
         mDrainVideoQueuePending = false;
         ++mVideoQueueGeneration;
+
+        prepareForMediaRenderingStart();
     }
 
     notifyFlushComplete(audio);
@@ -648,6 +686,8 @@ void NuPlayer::Renderer::onPause() {
     mDrainVideoQueuePending = false;
     ++mVideoQueueGeneration;
 
+    prepareForMediaRenderingStart();
+
     if (mHasAudio) {
         mAudioSink->pause();
     }
@@ -656,9 +696,6 @@ void NuPlayer::Renderer::onPause() {
           mAudioQueue.size(), mVideoQueue.size());
 
     mPaused = true;
-#ifdef QCOM_HARDWARE
-    mWasPaused = true;
-#endif
 }
 
 void NuPlayer::Renderer::onResume() {

@@ -1,7 +1,6 @@
 /* MidiFile.cpp
 **
 ** Copyright 2007, The Android Open Source Project
-** Copyright (c) 2012, Code Aurora Forum. All rights reserved.
 **
 ** Licensed under the Apache License, Version 2.0 (the "License");
 ** you may not use this file except in compliance with the License.
@@ -221,6 +220,9 @@ status_t MidiFile::start()
     }
 
     mRender = true;
+    if (mState == EAS_STATE_PLAY) {
+        sendEvent(MEDIA_STARTED);
+    }
 
     // wake up render thread
     ALOGV("  wakeup render thread");
@@ -243,6 +245,7 @@ status_t MidiFile::stop()
         }
     }
     mPaused = false;
+    sendEvent(MEDIA_STOPPED);
     return NO_ERROR;
 }
 
@@ -280,6 +283,7 @@ status_t MidiFile::pause()
         return ERROR_EAS_FAILURE;
     }
     mPaused = true;
+    sendEvent(MEDIA_PAUSED);
     return NO_ERROR;
 }
 
@@ -383,6 +387,7 @@ status_t MidiFile::reset()
 status_t MidiFile::reset_nosync()
 {
     ALOGV("MidiFile::reset_nosync");
+    sendEvent(MEDIA_STOPPED);
     // close file
     if (mEasHandle) {
         EAS_CloseFile(mEasData, mEasHandle);
@@ -423,7 +428,7 @@ status_t MidiFile::setLooping(int loop)
 
 status_t MidiFile::createOutputTrack() {
     if (mAudioSink->open(pLibConfig->sampleRate, pLibConfig->numChannels,
-            CHANNEL_MASK_USE_CHANNEL_ORDER, AUDIO_FORMAT_PCM_16_BIT, 2) != NO_ERROR) {
+            CHANNEL_MASK_USE_CHANNEL_ORDER, AUDIO_FORMAT_PCM_16_BIT, 2 /*bufferCount*/) != NO_ERROR) {
         ALOGE("mAudioSink open failed");
         return ERROR_OPEN_FAILED;
     }
@@ -485,8 +490,6 @@ int MidiFile::render() {
         // ALOGV("MidiFile::render - updating state");
         EAS_GetLocation(mEasData, mEasHandle, &mPlayTime);
         EAS_State(mEasData, mEasHandle, &mState);
-        if((mDuration > 0) && (mPlayTime >= mDuration))
-            mState = EAS_STATE_STOPPED;
         mMutex.unlock();
 
         // create audio output track if necessary

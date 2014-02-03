@@ -26,7 +26,7 @@
 #include <media/stagefright/OMXCodec.h>
 #include <utils/threads.h>
 
-#include <expat.h>
+#include <libexpat/expat.h>
 
 namespace android {
 
@@ -509,7 +509,8 @@ status_t MediaCodecList::getSupportedTypes(
 status_t MediaCodecList::getCodecCapabilities(
         size_t index, const char *type,
         Vector<ProfileLevel> *profileLevels,
-        Vector<uint32_t> *colorFormats) const {
+        Vector<uint32_t> *colorFormats,
+        uint32_t *flags) const {
     profileLevels->clear();
     colorFormats->clear();
 
@@ -546,6 +547,8 @@ status_t MediaCodecList::getCodecCapabilities(
     for (size_t i = 0; i < caps.mColorFormats.size(); ++i) {
         colorFormats->push(caps.mColorFormats.itemAt(i));
     }
+
+    *flags = caps.mFlags;
 
     return OK;
 }

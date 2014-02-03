@@ -32,17 +32,34 @@
 
 namespace android {
 
-NuPlayer::StreamingSource::StreamingSource(const sp<IStreamSource> &source)
-    : mSource(source),
+NuPlayer::StreamingSource::StreamingSource(
+        const sp<AMessage> &notify,
+        const sp<IStreamSource> &source)
+    : Source(notify),
+      mSource(source),
       mFinalResult(OK) {
 }
 
 NuPlayer::StreamingSource::~StreamingSource() {
 }
 
+void NuPlayer::StreamingSource::prepareAsync() {
+    notifyVideoSizeChanged(0, 0);
+    notifyFlagsChanged(0);
+    notifyPrepared();
+}
+
 void NuPlayer::StreamingSource::start() {
     mStreamListener = new NuPlayerStreamListener(mSource, 0);
-    mTSParser = new ATSParser(ATSParser::TS_TIMESTAMPS_ARE_ABSOLUTE);
+
+    uint32_t sourceFlags = mSource->flags();
+
+    uint32_t parserFlags = ATSParser::TS_TIMESTAMPS_ARE_ABSOLUTE;
+    if (sourceFlags & IStreamSource::kFlagAlignedVideoData) {
+        parserFlags |= ATSParser::ALIGNED_VIDEO_DATA;
+    }
+
+    mTSParser = new ATSParser(parserFlags);
 
     mStreamListener->start();
 }
@@ -85,8 +102,22 @@ status_t NuPlayer::StreamingSource::feedMoreTSData() {
         } else {
             if (buffer[0] == 0x00) {
                 // XXX legacy
+
+                if (extra == NULL) {
+                    extra = new AMessage;
+                }
+
+                uint8_t type = buffer[1];
+
+                if (type & 2) {
+                    int64_t mediaTimeUs;
+                    memcpy(&mediaTimeUs, &buffer[2], sizeof(mediaTimeUs));
+
+                    extra->setInt64(IStreamListener::kKeyMediaTimeUs, mediaTimeUs);
+                }
+
                 mTSParser->signalDiscontinuity(
-                        buffer[1] == 0x00
+                        ((type & 1) == 0)
                             ? ATSParser::DISCONTINUITY_SEEK
                             : ATSParser::DISCONTINUITY_FORMATCHANGE,
                         extra);
@@ -107,7 +138,7 @@ status_t NuPlayer::StreamingSource::feedMoreTSData() {
     return OK;
 }
 
-sp<MetaData> NuPlayer::StreamingSource::getFormat(bool audio) {
+sp<MetaData> NuPlayer::StreamingSource::getFormatMeta(bool audio) {
     ATSParser::SourceType type =
         audio ? ATSParser::AUDIO : ATSParser::VIDEO;
 
@@ -138,7 +169,21 @@ status_t NuPlayer::StreamingSource::dequeueAccessUnit(
         return finalResult == OK ? -EWOULDBLOCK : finalResult;
     }
 
-    return source->dequeueAccessUnit(accessUnit);
+    status_t err = source->dequeueAccessUnit(accessUnit);
+
+#if !defined(LOG_NDEBUG) || LOG_NDEBUG == 0
+    if (err == OK) {
+        int64_t timeUs;
+        CHECK((*accessUnit)->meta()->findInt64("timeUs", &timeUs));
+        ALOGV("dequeueAccessUnit timeUs=%lld us", timeUs);
+    }
+#endif
+
+    return err;
+}
+
+bool NuPlayer::StreamingSource::isRealTime() const {
+    return mSource->flags() & IStreamSource::kFlagIsRealTimeData;
 }
 
 }  // namespace android

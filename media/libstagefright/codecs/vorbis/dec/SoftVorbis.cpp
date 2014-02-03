@@ -93,7 +93,7 @@ void SoftVorbis::initPorts() {
 
     def.format.audio.pNativeRender = NULL;
     def.format.audio.bFlagErrorConcealment = OMX_FALSE;
-    def.format.audio.eEncoding = OMX_AUDIO_CodingAAC;
+    def.format.audio.eEncoding = OMX_AUDIO_CodingVORBIS;
 
     addPort(def);
 
@@ -408,6 +408,24 @@ void SoftVorbis::onPortFlushCompleted(OMX_U32 portIndex) {
         mNumFramesOutput = 0;
         vorbis_dsp_restart(mState);
     }
+}
+
+void SoftVorbis::onReset() {
+    mInputBufferCount = 0;
+    mNumFramesOutput = 0;
+    if (mState != NULL) {
+        vorbis_dsp_clear(mState);
+        delete mState;
+        mState = NULL;
+    }
+
+    if (mVi != NULL) {
+        vorbis_info_clear(mVi);
+        delete mVi;
+        mVi = NULL;
+    }
+
+    mOutputPortSettingsChange = NONE;
 }
 
 void SoftVorbis::onPortEnableCompleted(OMX_U32 portIndex, bool enabled) {

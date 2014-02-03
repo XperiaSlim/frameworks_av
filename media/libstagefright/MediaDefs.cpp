@@ -1,6 +1,5 @@
 /*
  * Copyright (C) 2009 The Android Open Source Project
- * Copyright (c) 2012, Code Aurora Forum. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,7 +20,8 @@ namespace android {
 
 const char *MEDIA_MIMETYPE_IMAGE_JPEG = "image/jpeg";
 
-const char *MEDIA_MIMETYPE_VIDEO_VPX = "video/x-vnd.on2.vp8";
+const char *MEDIA_MIMETYPE_VIDEO_VP8 = "video/x-vnd.on2.vp8";
+const char *MEDIA_MIMETYPE_VIDEO_VP9 = "video/x-vnd.on2.vp9";
 const char *MEDIA_MIMETYPE_VIDEO_AVC = "video/avc";
 const char *MEDIA_MIMETYPE_VIDEO_MPEG4 = "video/mp4v-es";
 const char *MEDIA_MIMETYPE_VIDEO_H263 = "video/3gpp";
@@ -41,37 +41,19 @@ const char *MEDIA_MIMETYPE_AUDIO_G711_MLAW = "audio/g711-mlaw";
 const char *MEDIA_MIMETYPE_AUDIO_RAW = "audio/raw";
 const char *MEDIA_MIMETYPE_AUDIO_FLAC = "audio/flac";
 const char *MEDIA_MIMETYPE_AUDIO_AAC_ADTS = "audio/aac-adts";
+const char *MEDIA_MIMETYPE_AUDIO_MSGSM = "audio/gsm";
 
 const char *MEDIA_MIMETYPE_CONTAINER_MPEG4 = "video/mp4";
-const char *MEDIA_MIMETYPE_CONTAINER_WAV = "audio/wav";
+const char *MEDIA_MIMETYPE_CONTAINER_WAV = "audio/x-wav";
 const char *MEDIA_MIMETYPE_CONTAINER_OGG = "application/ogg";
 const char *MEDIA_MIMETYPE_CONTAINER_MATROSKA = "video/x-matroska";
 const char *MEDIA_MIMETYPE_CONTAINER_MPEG2TS = "video/mp2ts";
 const char *MEDIA_MIMETYPE_CONTAINER_AVI = "video/avi";
 const char *MEDIA_MIMETYPE_CONTAINER_MPEG2PS = "video/mp2p";
+
 const char *MEDIA_MIMETYPE_CONTAINER_WVM = "video/wvm";
-const char *MEDIA_MIMETYPE_AUDIO_WMAPRO = "audio/wmapro";
-const char *MEDIA_MIMETYPE_AUDIO_WMALSL = "audio/wmalsl";
 
 const char *MEDIA_MIMETYPE_TEXT_3GPP = "text/3gpp-tt";
 const char *MEDIA_MIMETYPE_TEXT_SUBRIP = "application/x-subrip";
-
-const char *MEDIA_MIMETYPE_AUDIO_EVRC = "audio/evrc";
-
-const char *MEDIA_MIMETYPE_VIDEO_WMV = "video/x-ms-wmv";
-const char *MEDIA_MIMETYPE_AUDIO_WMA = "audio/x-ms-wma";
-const char *MEDIA_MIMETYPE_CONTAINER_ASF = "video/x-ms-asf";
-const char *MEDIA_MIMETYPE_VIDEO_DIVX = "video/divx";
-const char *MEDIA_MIMETYPE_AUDIO_AC3 = "audio/ac3";
-const char *MEDIA_MIMETYPE_AUDIO_EAC3 = "audio/eac3";
-const char *MEDIA_MIMETYPE_CONTAINER_AAC = "audio/aac";
-const char *MEDIA_MIMETYPE_CONTAINER_QCP = "audio/vnd.qcelp";
-const char *MEDIA_MIMETYPE_VIDEO_DIVX311 = "video/divx311";
-const char *MEDIA_MIMETYPE_VIDEO_DIVX4 = "video/divx4";
-
-const char *MEDIA_MIMETYPE_CONTAINER_MPEG2 = "video/mp2";
-
-const char *MEDIA_MIMETYPE_CONTAINER_3G2 = "video/3g2";
-const char *MEDIA_MIMETYPE_AUDIO_DTS = "audio/dts";
 
 }  // namespace android

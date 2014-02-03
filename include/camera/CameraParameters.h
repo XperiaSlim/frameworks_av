@@ -66,6 +66,9 @@ public:
     void setFloat(const char *key, float value);
     const char *get(const char *key) const;
     int getInt(const char *key) const;
+#ifdef SAMSUNG_CAMERA_HARDWARE
+    int getInt64(const char *key) const;
+#endif
     float getFloat(const char *key) const;
 
     void remove(const char *key);
@@ -114,6 +117,7 @@ public:
     void setPictureSize(int width, int height);
     void getPictureSize(int *width, int *height) const;
     void getSupportedPictureSizes(Vector<Size> &sizes) const;
+    void set3DFileFormat(const char* buffer);
     void setPictureFormat(const char *format);
     const char *getPictureFormat() const;
 #ifdef QCOM_HARDWARE
@@ -179,11 +183,13 @@ public:
     static const char KEY_SUPPORTED_PREVIEW_FRAME_RATE_MODES[];
     static const char KEY_PREVIEW_FRAME_RATE_AUTO_MODE[];
     static const char KEY_PREVIEW_FRAME_RATE_FIXED_MODE[];
+#ifdef QCOM_LEGACY_CAM_PARAMS
     static const char KEY_CAPTURE_MODE[];
     static const char KEY_SUPPORTED_CAPTURE_MODES[];
     static const char KEY_PICTURE_COUNT[];
     static const char KEY_MAX_BURST_PICTURE_COUNT[];
     static const char KEY_SUPPORTED_CONTINUOUS_AF[];
+    static const char KEY_SUPPORTED_CAF[];
     static const char CAPTURE_MODE_NORMAL[];
     static const char CAPTURE_MODE_BURST[];
     static const char CAPTURE_MODE_CONTI_BURST[];
@@ -191,12 +197,15 @@ public:
     static const char CAPTURE_MODE_HJR[];
     static const char CAPTURE_MODE_PANORAMA[];
 #endif
+#endif
     // The dimensions for captured pictures in pixels (width x height).
     // Example value: "1024x768". Read/write.
     static const char KEY_PICTURE_SIZE[];
     // Supported dimensions for captured pictures in pixels.
     // Example value: "2048x1536,1024x768". Read only.
     static const char KEY_SUPPORTED_PICTURE_SIZES[];
+    //HTC 3D color format
+    static const char KEY_SUPPORTED_3D_FILE_FORMAT[];
     // The image format for captured pictures. See CAMERA_MSG_COMPRESSED_IMAGE
     // in frameworks/base/include/camera/Camera.h.
     // Example value: "jpeg" or PIXEL_FORMAT_XXX constants. Read/write.
@@ -371,7 +380,7 @@ public:
     // Example value: "42.5". Read only.
     static const char KEY_VERTICAL_VIEW_ANGLE[];
     // Exposure compensation index. 0 means exposure is not adjusted.
-    // Example value: "0" or "5". Read/write.
+    // Example value: "-5" or "5". Read/write.
     static const char KEY_EXPOSURE_COMPENSATION[];
     // The maximum exposure compensation index (>=0).
     // Example value: "6". Read only.
@@ -380,7 +389,7 @@ public:
     // Example value: "-6". Read only.
     static const char KEY_MIN_EXPOSURE_COMPENSATION[];
     // The exposure compensation step. Exposure compensation index multiply by
-    // step eqals to EV. Ex: if exposure compensation index is 6 and step is
+    // step eqals to EV. Ex: if exposure compensation index is -6 and step is
     // 0.3333, EV is -2.
     // Example value: "0.333333333" or "0.5". Read only.
     static const char KEY_EXPOSURE_COMPENSATION_STEP[];
@@ -580,12 +589,9 @@ public:
     static const char KEY_VIDEO_SNAPSHOT_SUPPORTED[];
     static const char KEY_FULL_VIDEO_SNAP_SUPPORTED[];
 
-#if defined(QCOM_HARDWARE) || defined(EXYNOS4X12_ENHANCEMENTS)
-    static const char KEY_SUPPORTED_ISO_MODES[];
-    static const char KEY_ISO_MODE[];
-#endif
-
 #ifdef QCOM_HARDWARE
+    static const char KEY_ISO_MODE[];
+    static const char KEY_SUPPORTED_ISO_MODES[];
     static const char KEY_LENSSHADE[] ;
     static const char KEY_SUPPORTED_LENSSHADE_MODES[] ;
 
@@ -617,6 +623,9 @@ public:
     static const char KEY_MEMORY_COLOR_ENHANCEMENT[];
     static const char KEY_SUPPORTED_MEM_COLOR_ENHANCE_MODES[];
 
+    static const char KEY_POWER_MODE_SUPPORTED[];
+    static const char KEY_POWER_MODE[];
+
     static const char KEY_ZSL[];
     static const char KEY_SUPPORTED_ZSL_MODES[];
 
@@ -631,6 +640,90 @@ public:
     // can set KEY_VIDEO_STABILIZATION to true and have a stabilized preview
     // stream and record stabilized videos.
     static const char KEY_VIDEO_STABILIZATION_SUPPORTED[];
+
+    // Supported modes for special effects with light.
+    // Example values: "lowlight,hdr".
+    static const char KEY_LIGHTFX[];
+
+#ifdef HAVE_ISO
+    static const char KEY_SUPPORTED_ISO_MODES[];
+    static const char KEY_ISO_MODE[];
+#endif
+
+#ifdef SAMSUNG_CAMERA_HARDWARE
+    static const char KEY_ANTI_SHAKE_MODE[];
+    static const char KEY_METERING[];
+    static const char KEY_WDR[];
+    static const char KEY_WEATHER[];
+    static const char KEY_CITYID[];
+#endif
+
+#ifdef HTC_CAMERA_HARDWARE
+    static const char KEY_TIME_CONS_POST_PROCESSING[];
+    static const char KEY_OIS_MODE[];
+    static const char KEY_APP_OIS_SETTING[];
+    static const char KEY_OIS_SUPPORT[];
+    static const char KEY_CONTIBURST_TYPE[];
+    static const char KEY_CAPTURE_MODE[];
+    static const char CAPTURE_MODE_NORMAL[];
+    static const char CAPTURE_MODE_CONTI_ZOE[];
+    static const char CAPTURE_MODE_CONTI_BURST[];
+    static const char CAPTURE_MODE_CONTI_BURST_ONE_SHOT[];
+    static const char CAPTURE_MODE_HDR[];
+    static const char CAPTURE_MODE_PANORAMA[];
+    static const char CAPTURE_MODE_ZOE[];
+    static const char KEY_CONTI_BURST_STATE[];
+    static const char KEY_SUPPORTED_CAPTURE_MODES[];
+    static const char KEY_MIN_CONTRAST[];
+    static const char KEY_DEF_CONTRAST[];
+    static const char KEY_MIN_SHARPNESS[];
+    static const char KEY_DEF_SHARPNESS[];
+    static const char KEY_MIN_SATURATION[];
+    static const char KEY_DEF_SATURATION[];
+    static const char KEY_SINGLE_ISP_OUTPUT_ENABLED[];
+    static const char POST_PROCESSING_ENABLE[];
+    static const char POST_PROCESSING_BYPASS[];
+    static const char POST_PROCESSING_DELAY[];
+    static const char SCENE_MODE_OFF[];
+    static const char SCENE_MODE_TEXT[];
+    static const char BURST_MODE_LIMIT20[];
+    static const char BURST_MODE_UNLIMITED[];
+    static const char OIS_MODE_OFF[];
+    static const char OIS_MODE_ON[];
+    static const char CONTI_BURST_CAPTURING[];
+    static const char CONTI_BURST_CAPTURE_DONE[];
+    static const char APP_OIS_SETTING_FALSE[];
+    static const char APP_OIS_SETTING_TRUE[];
+    static const char KEY_GPU_EFFECT[];
+    static const char KEY_GPU_EFFECT_PARAM_0[];
+    static const char KEY_GPU_EFFECT_PARAM_1[];
+    static const char KEY_GPU_EFFECT_PARAM_2[];
+    static const char KEY_GPU_EFFECT_PARAM_3[];
+    static const char KEY_FORCE_USE_AUDIO_ENABLED[];
+#endif
+
+#ifdef LG_CAMERA_HARDWARE
+    static const char AUDIO_ZOOM_OFF[];
+    static const char AUDIO_ZOOM_ON[];
+    static const char BEAUTY_SHOT_OFF[];
+    static const char BEAUTY_SHOT_ON[];
+    static const char BURST_SHOT_OFF[];
+    static const char BURST_SHOT_ON[];
+    static const char KEY_AUDIO_ZOOM[];
+    static const char KEY_AUDIO_ZOOM_SUPPORTED[];
+    static const char KEY_BEAUTY_SHOT[];
+    static const char KEY_BEAUTY_SHOT_SUPPORTED[];
+    static const char KEY_BURST_SHOT[];
+    static const char KEY_BURST_SHOT_SUPPORTED[];
+    static const char KEY_FOCUS_MODE_OBJECT_TRACKING[];
+    static const char KEY_FOCUS_MODE_OBJECT_TRACKING_SUPPORTED[];
+    static const char KEY_VIDEO_WDR[];
+    static const char KEY_VIDEO_WDR_SUPPORTED[];
+    static const char VIDEO_WDR_OFF[];
+    static const char VIDEO_WDR_ON[];
+    static const char OBJECT_TRACKING_ON[];
+    static const char OBJECT_TRACKING_OFF[];
+#endif
 
     static const char KEY_AE_BRACKET_HDR[];
 
@@ -659,12 +752,6 @@ public:
     static const char KEY_SUPPORTED_REDEYE_REDUCTION[];
 #endif
 
-#ifdef SAMSUNG_CAMERA_HARDWARE
-     static const char KEY_METERING[];
-     static const char KEY_WDR[];
-     static const char KEY_ANTI_SHAKE_MODE[];
-#endif
-
     // Values for white balance settings.
     static const char WHITE_BALANCE_AUTO[];
     static const char WHITE_BALANCE_INCANDESCENT[];
@@ -685,6 +772,15 @@ public:
     static const char EFFECT_WHITEBOARD[];
     static const char EFFECT_BLACKBOARD[];
     static const char EFFECT_AQUA[];
+#ifdef SAMSUNG_CAMERA_HARDWARE
+    static const char EFFECT_CARTOONIZE[];
+    static const char EFFECT_POINT_RED_YELLOW[];
+    static const char EFFECT_POINT_GREEN[];
+    static const char EFFECT_POINT_BLUE[];
+    static const char EFFECT_VINTAGE_COLD[];
+    static const char EFFECT_VINTAGE_WARM[];
+    static const char EFFECT_WASHED[];
+#endif
 #ifdef QCOM_HARDWARE
     static const char EFFECT_EMBOSS[];
     static const char EFFECT_SKETCH[];
@@ -737,11 +833,14 @@ public:
     static const char SCENE_MODE_BACKLIGHT[];
     static const char SCENE_MODE_FLOWERS[];
     static const char SCENE_MODE_AR[];
-    static const char SCENE_MODE_OFF[];
 #endif
     // Applications are looking for a barcode. Camera driver will be optimized
     // for barcode reading.
     static const char SCENE_MODE_BARCODE[];
+    // A high-dynamic range mode. In this mode, the HAL module will use a
+    // capture strategy that extends the dynamic range of the captured
+    // image in some fashion. Only the final image is returned.
+    static const char SCENE_MODE_HDR[];
 
     // Pixel color formats for KEY_PREVIEW_FORMAT, KEY_PICTURE_FORMAT,
     // and KEY_VIDEO_FRAME_FORMAT
@@ -762,6 +861,10 @@ public:
     // Raw bayer format used for images, which is 10 bit precision samples
     // stored in 16 bit words. The filter pattern is RGGB.
     static const char PIXEL_FORMAT_BAYER_RGGB[];
+
+    // Pixel format is not known to the framework
+    static const char PIXEL_FORMAT_ANDROID_OPAQUE[];
+
 #ifdef QCOM_HARDWARE
     static const char PIXEL_FORMAT_RAW[];
     static const char PIXEL_FORMAT_YV12[]; // NV21
@@ -819,7 +922,14 @@ public:
     // other modes.
     static const char FOCUS_MODE_CONTINUOUS_PICTURE[];
 
+    // Values for light special effects
+    // Low-light enhancement mode
+    static const char LIGHTFX_LOWLIGHT[];
+    // High-dynamic range mode
+    static const char LIGHTFX_HDR[];
+
 #ifdef QCOM_HARDWARE
+#ifdef QCOM_LEGACY_CAM_PARAMS
     static const char FOCUS_MODE_CONTINUOUS_CAMERA[];
 
     // Values for Continuous AF
@@ -829,7 +939,12 @@ public:
     static const char CONTINUOUS_AF_OFF[] ;
     static const char CONTINUOUS_AF_ON[] ;
     static const char KEY_CONTINUOUS_AF[] ;
-
+    static const char KEY_CAF[] ;
+    static const char KEY_TAKING_PICTURE_ZOOM[];
+    static const char KEY_PANORAMA_MODE[];
+    static const char PANORAMA_MODE_NOT_INPROGRESS[];
+    static const char PANORAMA_MODE_INPROGRESS[];
+#endif
     // Normal focus mode. Applications should call
     // CameraHardwareInterface.autoFocus to start the focus in this mode.
     static const char FOCUS_MODE_NORMAL[];
@@ -840,6 +955,8 @@ public:
     static const char ISO_400[];
     static const char ISO_800[];
     static const char ISO_1600[];
+    static const char ISO_3200[];
+    static const char ISO_6400[];
     // Values for Lens Shading
     static const char LENSSHADE_ENABLE[] ;
     static const char LENSSHADE_DISABLE[] ;
@@ -851,13 +968,19 @@ public:
 
     static const char KEY_SHARPNESS[];
     static const char KEY_MAX_SHARPNESS[];
+#ifdef QCOM_LEGACY_CAM_PARAMS
     static const char KEY_MIN_SHARPNESS[];
+#endif
     static const char KEY_CONTRAST[];
     static const char KEY_MAX_CONTRAST[];
+#ifdef QCOM_LEGACY_CAM_PARAMS
     static const char KEY_MIN_CONTRAST[];
+#endif
     static const char KEY_SATURATION[];
     static const char KEY_MAX_SATURATION[];
+#ifdef QCOM_LEGACY_CAM_PARAMS
     static const char KEY_MIN_SATURATION[];
+#endif
 
     static const char KEY_HISTOGRAM[] ;
     static const char KEY_SUPPORTED_HISTOGRAM_MODES[] ;
@@ -883,6 +1006,10 @@ public:
     static const char FACE_DETECTION_OFF[];
     static const char FACE_DETECTION_ON[];
 
+    // Values for HTC 3D image settings.
+    static const char FILE_FORMAT_MPO[];
+    static const char FILE_FORMAT_JPS[];
+
     // Values for MCE settings.
     static const char MCE_ENABLE[];
     static const char MCE_DISABLE[];
@@ -896,6 +1023,10 @@ public:
     static const char AE_BRACKET_HDR[];
     static const char AE_BRACKET[];
 
+    //POWER MODE
+    static const char LOW_POWER[];
+    static const char NORMAL_POWER[];
+
     // Values for HFR settings.
     static const char VIDEO_HFR_OFF[];
     static const char VIDEO_HFR_2X[];
@@ -908,6 +1039,28 @@ public:
     // Values for HDR settings.
     static const char HDR_ENABLE[];
     static const char HDR_DISABLE[];
+
+#if defined(QCOM_HARDWARE) && defined(SAMSUNG_CAMERA_LEGACY)
+    static const char FOCUS_MODE_FACEDETECT[];
+    static const char FOCUS_MODE_TOUCHAF[];
+    static const char ISO_50[];
+    static const char KEY_ANTI_SHAKE_MODE[];
+    static const char KEY_AUTO_CONTRAST[];
+    static const char KEY_BEAUTY_MODE[];
+    static const char KEY_BLUR_MODE[];
+    static const char KEY_VINTAGE_MODE[];
+    static const char KEY_WDR_MODE[];
+    static const char VINTAGE_MODE_BNW[];
+    static const char VINTAGE_MODE_COOL[];
+    static const char VINTAGE_MODE_NORMAL[];
+    static const char VINTAGE_MODE_OFF[];
+    static const char VINTAGE_MODE_WARM[];
+    static const char SCENE_MODE_DAWN[];
+    static const char SCENE_MODE_DUSKDAWN[];
+    static const char SCENE_MODE_FALL[];
+    static const char SCENE_MODE_FALL_COLOR[];
+    static const char SCENE_MODE_TEXT[];
+#endif
 
    // Values for Redeye Reduction settings.
    // static const char REDEYE_REDUCTION_ENABLE[];
@@ -924,7 +1077,9 @@ public:
     int getOrientation() const;
     void setOrientation(int orientation);
     void setPreviewFpsRange(int minFPS,int maxFPS);
+#ifdef QCOM_LEGACY_CAM_PARAMS
     void setPostviewSize(int x, int y);
+#endif
     void getSupportedHfrSizes(Vector<Size> &sizes) const;
 #endif
 

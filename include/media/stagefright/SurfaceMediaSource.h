@@ -17,7 +17,7 @@
 #ifndef ANDROID_GUI_SURFACEMEDIASOURCE_H
 #define ANDROID_GUI_SURFACEMEDIASOURCE_H
 
-#include <gui/ISurfaceTexture.h>
+#include <gui/IGraphicBufferProducer.h>
 #include <gui/BufferQueue.h>
 
 #include <utils/threads.h>
@@ -35,7 +35,7 @@ class GraphicBuffer;
 // ASSUMPTIONS
 // 1. SurfaceMediaSource is initialized with width*height which
 // can never change.  However, deqeueue buffer does not currently
-// enforce this as in BufferQueue, dequeue can be used by SurfaceTexture
+// enforce this as in BufferQueue, dequeue can be used by Surface
 // which can modify the default width and heght.  Also neither the width
 // nor height can be 0.
 // 2. setSynchronousMode is never used (basically no one should call
@@ -52,9 +52,11 @@ class GraphicBuffer;
 // may be dropped.  It is possible to wait for the buffers to be
 // returned (but not implemented)
 
+#define DEBUG_PENDING_BUFFERS   0
+
 class SurfaceMediaSource : public MediaSource,
                                 public MediaBufferObserver,
-                                protected BufferQueue::ConsumerListener {
+                                protected ConsumerListener {
 public:
     enum { MIN_UNDEQUEUED_BUFFERS = 4};
 
@@ -73,10 +75,9 @@ public:
 
     // For the MediaSource interface for use by StageFrightRecorder:
     virtual status_t start(MetaData *params = NULL);
-
-    virtual status_t stop() { return reset(); }
-    virtual status_t read(
-            MediaBuffer **buffer, const ReadOptions *options = NULL);
+    virtual status_t stop();
+    virtual status_t read(MediaBuffer **buffer,
+            const ReadOptions *options = NULL);
     virtual sp<MetaData> getFormat();
 
     // Get / Set the frame rate used for encoding. Default fps = 30
@@ -112,10 +113,16 @@ public:
 
     sp<BufferQueue> getBufferQueue() const { return mBufferQueue; }
 
+    // To be called before start()
+    status_t setMaxAcquiredBufferCount(size_t count);
+
+    // To be called before start()
+    status_t setUseAbsoluteTimestamps();
+
 protected:
 
     // Implementation of the BufferQueue::ConsumerListener interface.  These
-    // calls are used to notify the SurfaceTexture of asynchronous events in the
+    // calls are used to notify the Surface of asynchronous events in the
     // BufferQueue.
     virtual void onFrameAvailable();
 
@@ -139,9 +146,13 @@ private:
     // this consumer
     sp<BufferQueue> mBufferQueue;
 
-    // mBufferSlot caches GraphicBuffers from the buffer queue
-    sp<GraphicBuffer> mBufferSlot[BufferQueue::NUM_BUFFER_SLOTS];
+    struct SlotData {
+        sp<GraphicBuffer> mGraphicBuffer;
+        uint64_t mFrameNumber;
+    };
 
+    // mSlots caches GraphicBuffers and frameNumbers from the buffer queue
+    SlotData mSlots[BufferQueue::NUM_BUFFER_SLOTS];
 
     // The permenent width and height of SMS buffers
     int mWidth;
@@ -150,7 +161,7 @@ private:
     // mCurrentSlot is the buffer slot index of the buffer that is currently
     // being used by buffer consumer
     // (e.g. StageFrightRecorder in the case of SurfaceMediaSource or GLTexture
-    // in the case of SurfaceTexture).
+    // in the case of Surface).
     // It is initialized to INVALID_BUFFER_SLOT,
     // indicating that no buffer slot is currently bound to the texture. Note,
     // however, that a value of INVALID_BUFFER_SLOT does not necessarily mean
@@ -164,6 +175,12 @@ private:
     // separately.  Buffers are added to this list in read, and removed from
     // this list in signalBufferReturned
     Vector<sp<GraphicBuffer> > mCurrentBuffers;
+
+    size_t mNumPendingBuffers;
+
+#if DEBUG_PENDING_BUFFERS
+    Vector<MediaBuffer *> mPendingBuffers;
+#endif
 
     // mCurrentTimestamp is the timestamp for the current texture. It
     // gets set to mLastQueuedTimestamp each time updateTexImage is called.
@@ -183,8 +200,8 @@ private:
     // Set to a default of 30 fps if not specified by the client side
     int32_t mFrameRate;
 
-    // mStopped is a flag to check if the recording is going on
-    bool mStopped;
+    // mStarted is a flag to check if the recording is going on
+    bool mStarted;
 
     // mNumFramesReceived indicates the number of frames recieved from
     // the client side
@@ -200,21 +217,16 @@ private:
     // offset timestamps.
     int64_t mStartTimeNs;
 
+    size_t mMaxAcquiredBufferCount;
+
+    bool mUseAbsoluteTimestamps;
+
     // mFrameAvailableCondition condition used to indicate whether there
     // is a frame available for dequeuing
     Condition mFrameAvailableCondition;
 
-#ifdef QCOM_HARDWARE
-    // onBufferReleased is called twice, first on setBufferCount, second on disconnect
-    // Do not stop recording on the first call
-    bool mFirstBufferReleased;
-#endif
+    Condition mMediaBuffersAvailableCondition;
 
-    status_t reset();
-
-#ifdef QCOM_HARDWARE
-    void releaseBuffers();
-#endif
     // Avoid copying and equating and default constructor
     DISALLOW_IMPLICIT_CONSTRUCTORS(SurfaceMediaSource);
 };

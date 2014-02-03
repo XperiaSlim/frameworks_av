@@ -35,14 +35,18 @@ struct NuPlayer : public AHandler {
 
     void setDriver(const wp<NuPlayerDriver> &driver);
 
-    void setDataSource(const sp<IStreamSource> &source);
+    void setDataSourceAsync(const sp<IStreamSource> &source);
 
-    void setDataSource(
+    void setDataSourceAsync(
             const char *url, const KeyedVector<String8, String8> *headers);
 
-    void setDataSource(int fd, int64_t offset, int64_t length);
+    void setDataSourceAsync(int fd, int64_t offset, int64_t length);
 
-    void setVideoSurfaceTexture(const sp<ISurfaceTexture> &surfaceTexture);
+    void prepareAsync();
+
+    void setVideoSurfaceTextureAsync(
+            const sp<IGraphicBufferProducer> &bufferProducer);
+
     void setAudioSink(const sp<MediaPlayerBase::AudioSink> &sink);
     void start();
 
@@ -55,33 +59,36 @@ struct NuPlayer : public AHandler {
     // Will notify the driver through "notifySeekComplete" once finished.
     void seekToAsync(int64_t seekTimeUs);
 
-#ifdef QCOM_HARDWARE
-    status_t prepareAsync();
-    status_t getParameter(int key, Parcel *reply);
-    status_t setParameter(int key, const Parcel &request);
-
-public:
-    struct DASHHTTPLiveSource;
-    struct WFDSource;
-#endif
+    status_t setVideoScalingMode(int32_t mode);
+    status_t getTrackInfo(Parcel* reply) const;
+    status_t selectTrack(size_t trackIndex, bool select);
 
 protected:
     virtual ~NuPlayer();
 
     virtual void onMessageReceived(const sp<AMessage> &msg);
 
+public:
+    struct NuPlayerStreamListener;
+    struct Source;
+
 private:
     struct Decoder;
     struct GenericSource;
     struct HTTPLiveSource;
-    struct NuPlayerStreamListener;
     struct Renderer;
     struct RTSPSource;
-    struct Source;
     struct StreamingSource;
+    struct Action;
+    struct SeekAction;
+    struct SetSurfaceAction;
+    struct ShutdownDecoderAction;
+    struct PostMessageAction;
+    struct SimpleAction;
 
     enum {
         kWhatSetDataSource              = '=DaS',
+        kWhatPrepare                    = 'prep',
         kWhatSetVideoNativeWindow       = '=NaW',
         kWhatSetAudioSink               = '=AuS',
         kWhatMoreDataQueued             = 'more',
@@ -94,14 +101,17 @@ private:
         kWhatSeek                       = 'seek',
         kWhatPause                      = 'paus',
         kWhatResume                     = 'rsme',
-        kWhatPrepareAsync               = 'pras',
-        kWhatIsPrepareDone              = 'prdn',
+        kWhatPollDuration               = 'polD',
+        kWhatSourceNotify               = 'srcN',
+        kWhatGetTrackInfo               = 'gTrI',
+        kWhatSelectTrack                = 'selT',
     };
 
     wp<NuPlayerDriver> mDriver;
     bool mUIDValid;
     uid_t mUID;
     sp<Source> mSource;
+    uint32_t mSourceFlags;
     sp<NativeWindowWrapper> mNativeWindow;
     sp<MediaPlayerBase::AudioSink> mAudioSink;
     sp<Decoder> mVideoDecoder;
@@ -109,11 +119,15 @@ private:
     sp<Decoder> mAudioDecoder;
     sp<Renderer> mRenderer;
 
+    List<sp<Action> > mDeferredActions;
+
     bool mAudioEOS;
     bool mVideoEOS;
 
     bool mScanSourcesPending;
     int32_t mScanSourcesGeneration;
+
+    int32_t mPollDurationGeneration;
 
     enum FlushStatus {
         NONE,
@@ -131,8 +145,6 @@ private:
 
     FlushStatus mFlushingAudio;
     FlushStatus mFlushingVideo;
-    bool mResetInProgress;
-    bool mResetPostponed;
 
     int64_t mSkipRenderingAudioUntilMediaTimeUs;
     int64_t mSkipRenderingVideoUntilMediaTimeUs;
@@ -140,31 +152,16 @@ private:
     int64_t mVideoLateByUs;
     int64_t mNumFramesTotal, mNumFramesDropped;
 
-#ifdef QCOM_HARDWARE
-    bool mPauseIndication;
-#endif
+    int32_t mVideoScalingMode;
 
-    Mutex mLock;
-
-    enum NuSourceType {
-        kHttpLiveSource = 0,
-        kHttpDashSource,
-        kRtspSource,
-        kStreamingSource,
-        kWfdSource,
-        kGenericSource,
-        kDefaultSource
-    };
-#ifdef QCOM_HARDWARE
-    NuSourceType mSourceType;
-#endif
+    bool mStarted;
 
     status_t instantiateDecoder(bool audio, sp<Decoder> *decoder);
 
     status_t feedDecoderInputData(bool audio, const sp<AMessage> &msg);
     void renderBuffer(bool audio, const sp<AMessage> &msg);
 
-    void notifyListener(int msg, int ext1, int ext2);
+    void notifyListener(int msg, int ext1, int ext2, const Parcel *in = NULL);
 
     void finishFlushIfPossible();
 
@@ -172,15 +169,25 @@ private:
 
     static bool IsFlushingState(FlushStatus state, bool *needShutdown = NULL);
 
-    void finishReset();
     void postScanSources();
 
-#ifdef QCOM_HARDWARE
-    sp<Source> LoadCreateSource(const char * uri, const KeyedVector<String8,
-                                 String8> *headers, bool uidValid, uid_t uid, NuSourceType srcTyp);
+    void schedulePollDuration();
+    void cancelPollDuration();
 
-    void postIsPrepareDone();
-#endif
+    void processDeferredActions();
+
+    void performSeek(int64_t seekTimeUs);
+    void performDecoderFlush();
+    void performDecoderShutdown(bool audio, bool video);
+    void performReset();
+    void performScanSources();
+    void performSetSurface(const sp<NativeWindowWrapper> &wrapper);
+
+    void onSourceNotify(const sp<AMessage> &msg);
+
+    void queueDecoderShutdown(
+            bool audio, bool video, const sp<AMessage> &reply);
+
     DISALLOW_EVIL_CONSTRUCTORS(NuPlayer);
 };
 

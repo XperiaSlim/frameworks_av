@@ -21,20 +21,25 @@
 #include "NuPlayerDriver.h"
 
 #include "NuPlayer.h"
+#include "NuPlayerSource.h"
 
 #include <media/stagefright/foundation/ADebug.h>
 #include <media/stagefright/foundation/ALooper.h>
+#include <media/stagefright/MetaData.h>
 
 namespace android {
 
 NuPlayerDriver::NuPlayerDriver()
-    : mResetInProgress(false),
+    : mState(STATE_IDLE),
+      mIsAsyncPrepare(false),
+      mAsyncResult(UNKNOWN_ERROR),
+      mSetSurfaceInProgress(false),
       mDurationUs(-1),
       mPositionUs(-1),
       mNumFramesTotal(0),
       mNumFramesDropped(0),
       mLooper(new ALooper),
-      mState(UNINITIALIZED),
+      mPlayerFlags(0),
       mAtEOS(false),
       mStartupSeekTimeUs(-1) {
     mLooper->setName("NuPlayerDriver Looper");
@@ -66,75 +71,143 @@ status_t NuPlayerDriver::setUID(uid_t uid) {
 
 status_t NuPlayerDriver::setDataSource(
         const char *url, const KeyedVector<String8, String8> *headers) {
-    CHECK_EQ((int)mState, (int)UNINITIALIZED);
+    Mutex::Autolock autoLock(mLock);
 
-    mPlayer->setDataSource(url, headers);
+    if (mState != STATE_IDLE) {
+        return INVALID_OPERATION;
+    }
 
-    mState = STOPPED;
+    mState = STATE_SET_DATASOURCE_PENDING;
 
-    return OK;
+    mPlayer->setDataSourceAsync(url, headers);
+
+    while (mState == STATE_SET_DATASOURCE_PENDING) {
+        mCondition.wait(mLock);
+    }
+
+    return mAsyncResult;
 }
 
 status_t NuPlayerDriver::setDataSource(int fd, int64_t offset, int64_t length) {
-    CHECK_EQ((int)mState, (int)UNINITIALIZED);
+    Mutex::Autolock autoLock(mLock);
 
-    mPlayer->setDataSource(fd, offset, length);
+    if (mState != STATE_IDLE) {
+        return INVALID_OPERATION;
+    }
 
-    mState = STOPPED;
+    mState = STATE_SET_DATASOURCE_PENDING;
 
-    return OK;
+    mPlayer->setDataSourceAsync(fd, offset, length);
+
+    while (mState == STATE_SET_DATASOURCE_PENDING) {
+        mCondition.wait(mLock);
+    }
+
+    return mAsyncResult;
 }
 
 status_t NuPlayerDriver::setDataSource(const sp<IStreamSource> &source) {
-    CHECK_EQ((int)mState, (int)UNINITIALIZED);
+    Mutex::Autolock autoLock(mLock);
 
-    mPlayer->setDataSource(source);
+    if (mState != STATE_IDLE) {
+        return INVALID_OPERATION;
+    }
 
-    mState = STOPPED;
+    mState = STATE_SET_DATASOURCE_PENDING;
 
-    return OK;
+    mPlayer->setDataSourceAsync(source);
+
+    while (mState == STATE_SET_DATASOURCE_PENDING) {
+        mCondition.wait(mLock);
+    }
+
+    return mAsyncResult;
 }
 
 status_t NuPlayerDriver::setVideoSurfaceTexture(
-        const sp<ISurfaceTexture> &surfaceTexture) {
-    mPlayer->setVideoSurfaceTexture(surfaceTexture);
+        const sp<IGraphicBufferProducer> &bufferProducer) {
+    Mutex::Autolock autoLock(mLock);
+
+    if (mSetSurfaceInProgress) {
+        return INVALID_OPERATION;
+    }
+
+    switch (mState) {
+        case STATE_SET_DATASOURCE_PENDING:
+        case STATE_RESET_IN_PROGRESS:
+            return INVALID_OPERATION;
+
+        default:
+            break;
+    }
+
+    mSetSurfaceInProgress = true;
+
+    mPlayer->setVideoSurfaceTextureAsync(bufferProducer);
+
+    while (mSetSurfaceInProgress) {
+        mCondition.wait(mLock);
+    }
 
     return OK;
 }
 
 status_t NuPlayerDriver::prepare() {
-    sendEvent(MEDIA_SET_VIDEO_SIZE, 0, 0);
-    return OK;
+    Mutex::Autolock autoLock(mLock);
+    return prepare_l();
+}
+
+status_t NuPlayerDriver::prepare_l() {
+    switch (mState) {
+        case STATE_UNPREPARED:
+            mState = STATE_PREPARING;
+
+            // Make sure we're not posting any notifications, success or
+            // failure information is only communicated through our result
+            // code.
+            mIsAsyncPrepare = false;
+            mPlayer->prepareAsync();
+            while (mState == STATE_PREPARING) {
+                mCondition.wait(mLock);
+            }
+            return (mState == STATE_PREPARED) ? OK : UNKNOWN_ERROR;
+        default:
+            return INVALID_OPERATION;
+    };
 }
 
 status_t NuPlayerDriver::prepareAsync() {
-#ifdef QCOM_HARDWARE
-    status_t err = UNKNOWN_ERROR;
-    if (mPlayer != NULL) {
-        err = mPlayer->prepareAsync();
-    }
+    Mutex::Autolock autoLock(mLock);
 
-    if (err == OK) {
-        err = prepare();
-        notifyListener(MEDIA_PREPARED);
-    } else if (err == -EWOULDBLOCK) {
-        // this case only happens for DASH
-        return OK;
-    }
-#else
-    status_t err = prepare();
-
-    notifyListener(MEDIA_PREPARED);
-#endif
-
-    return err;
+    switch (mState) {
+        case STATE_UNPREPARED:
+            mState = STATE_PREPARING;
+            mIsAsyncPrepare = true;
+            mPlayer->prepareAsync();
+            return OK;
+        default:
+            return INVALID_OPERATION;
+    };
 }
 
 status_t NuPlayerDriver::start() {
+    Mutex::Autolock autoLock(mLock);
+
     switch (mState) {
-        case UNINITIALIZED:
-            return INVALID_OPERATION;
-        case STOPPED:
+        case STATE_UNPREPARED:
+        {
+            status_t err = prepare_l();
+
+            if (err != OK) {
+                return err;
+            }
+
+            CHECK_EQ(mState, STATE_PREPARED);
+
+            // fall through
+        }
+
+        case STATE_PREPARED:
         {
             mAtEOS = false;
             mPlayer->start();
@@ -148,21 +221,23 @@ status_t NuPlayerDriver::start() {
 
                 mStartupSeekTimeUs = -1;
             }
-
             break;
         }
-        case PLAYING:
-            return OK;
-        default:
-        {
-            CHECK_EQ((int)mState, (int)PAUSED);
 
+        case STATE_RUNNING:
+            break;
+
+        case STATE_PAUSED:
+        {
             mPlayer->resume();
             break;
         }
+
+        default:
+            return INVALID_OPERATION;
     }
 
-    mState = PLAYING;
+    mState = STATE_RUNNING;
 
     return OK;
 }
@@ -172,52 +247,55 @@ status_t NuPlayerDriver::stop() {
 }
 
 status_t NuPlayerDriver::pause() {
+    Mutex::Autolock autoLock(mLock);
+
     switch (mState) {
-        case UNINITIALIZED:
-            return INVALID_OPERATION;
-        case STOPPED:
+        case STATE_PAUSED:
+        case STATE_PREPARED:
             return OK;
-        case PLAYING:
+
+        case STATE_RUNNING:
+            notifyListener(MEDIA_PAUSED);
             mPlayer->pause();
             break;
+
         default:
-        {
-            CHECK_EQ((int)mState, (int)PAUSED);
-            return OK;
-        }
+            return INVALID_OPERATION;
     }
 
-    mState = PAUSED;
+    mState = STATE_PAUSED;
 
     return OK;
 }
 
 bool NuPlayerDriver::isPlaying() {
-    return mState == PLAYING && !mAtEOS;
+    return mState == STATE_RUNNING && !mAtEOS;
 }
 
 status_t NuPlayerDriver::seekTo(int msec) {
+    Mutex::Autolock autoLock(mLock);
+
     int64_t seekTimeUs = msec * 1000ll;
 
     switch (mState) {
-        case UNINITIALIZED:
-            return INVALID_OPERATION;
-        case STOPPED:
+        case STATE_PREPARED:
         {
             mStartupSeekTimeUs = seekTimeUs;
             break;
         }
-        case PLAYING:
-        case PAUSED:
+
+        case STATE_RUNNING:
+        case STATE_PAUSED:
         {
             mAtEOS = false;
+            // seeks can take a while, so we essentially paused
+            notifyListener(MEDIA_PAUSED);
             mPlayer->seekToAsync(seekTimeUs);
             break;
         }
 
         default:
-            TRESPASS();
-            break;
+            return INVALID_OPERATION;
     }
 
     return OK;
@@ -239,27 +317,48 @@ status_t NuPlayerDriver::getDuration(int *msec) {
     Mutex::Autolock autoLock(mLock);
 
     if (mDurationUs < 0) {
-        *msec = 0;
-    } else {
-        *msec = (mDurationUs + 500ll) / 1000;
+        return UNKNOWN_ERROR;
     }
+
+    *msec = (mDurationUs + 500ll) / 1000;
 
     return OK;
 }
 
 status_t NuPlayerDriver::reset() {
     Mutex::Autolock autoLock(mLock);
-    mResetInProgress = true;
 
+    switch (mState) {
+        case STATE_IDLE:
+            return OK;
+
+        case STATE_SET_DATASOURCE_PENDING:
+        case STATE_RESET_IN_PROGRESS:
+            return INVALID_OPERATION;
+
+        case STATE_PREPARING:
+        {
+            CHECK(mIsAsyncPrepare);
+
+            notifyListener(MEDIA_PREPARED);
+            break;
+        }
+
+        default:
+            break;
+    }
+
+    notifyListener(MEDIA_STOPPED);
+
+    mState = STATE_RESET_IN_PROGRESS;
     mPlayer->resetAsync();
 
-    while (mResetInProgress) {
+    while (mState == STATE_RESET_IN_PROGRESS) {
         mCondition.wait(mLock);
     }
 
     mDurationUs = -1;
     mPositionUs = -1;
-    mState = UNINITIALIZED;
     mStartupSeekTimeUs = -1;
 
     return OK;
@@ -274,7 +373,47 @@ player_type NuPlayerDriver::playerType() {
 }
 
 status_t NuPlayerDriver::invoke(const Parcel &request, Parcel *reply) {
-    return INVALID_OPERATION;
+    if (reply == NULL) {
+        ALOGE("reply is a NULL pointer");
+        return BAD_VALUE;
+    }
+
+    int32_t methodId;
+    status_t ret = request.readInt32(&methodId);
+    if (ret != OK) {
+        ALOGE("Failed to retrieve the requested method to invoke");
+        return ret;
+    }
+
+    switch (methodId) {
+        case INVOKE_ID_SET_VIDEO_SCALING_MODE:
+        {
+            int mode = request.readInt32();
+            return mPlayer->setVideoScalingMode(mode);
+        }
+
+        case INVOKE_ID_GET_TRACK_INFO:
+        {
+            return mPlayer->getTrackInfo(reply);
+        }
+
+        case INVOKE_ID_SELECT_TRACK:
+        {
+            int trackIndex = request.readInt32();
+            return mPlayer->selectTrack(trackIndex, true /* select */);
+        }
+
+        case INVOKE_ID_UNSELECT_TRACK:
+        {
+            int trackIndex = request.readInt32();
+            return mPlayer->selectTrack(trackIndex, false /* select */);
+        }
+
+        default:
+        {
+            return INVALID_OPERATION;
+        }
+    }
 }
 
 void NuPlayerDriver::setAudioSink(const sp<AudioSink> &audioSink) {
@@ -282,38 +421,54 @@ void NuPlayerDriver::setAudioSink(const sp<AudioSink> &audioSink) {
 }
 
 status_t NuPlayerDriver::setParameter(int key, const Parcel &request) {
-    status_t err = INVALID_OPERATION;
-#ifdef QCOM_HARDWARE
-    err = UNKNOWN_ERROR;
-    if (mPlayer != NULL)
-    {
-        err = mPlayer->setParameter(key, request);
-    }
-#endif
-    return err;
+    return INVALID_OPERATION;
 }
 
 status_t NuPlayerDriver::getParameter(int key, Parcel *reply) {
-    status_t err = INVALID_OPERATION;
-#ifdef QCOM_HARDWARE
-    err = UNKNOWN_ERROR;
-    if (mPlayer != NULL)
-    {
-        err = mPlayer->getParameter(key, reply);
-    }
-#endif
-    return err;
+    return INVALID_OPERATION;
 }
 
 status_t NuPlayerDriver::getMetadata(
         const media::Metadata::Filter& ids, Parcel *records) {
-    return INVALID_OPERATION;
+    Mutex::Autolock autoLock(mLock);
+
+    using media::Metadata;
+
+    Metadata meta(records);
+
+    meta.appendBool(
+            Metadata::kPauseAvailable,
+            mPlayerFlags & NuPlayer::Source::FLAG_CAN_PAUSE);
+
+    meta.appendBool(
+            Metadata::kSeekBackwardAvailable,
+            mPlayerFlags & NuPlayer::Source::FLAG_CAN_SEEK_BACKWARD);
+
+    meta.appendBool(
+            Metadata::kSeekForwardAvailable,
+            mPlayerFlags & NuPlayer::Source::FLAG_CAN_SEEK_FORWARD);
+
+    meta.appendBool(
+            Metadata::kSeekAvailable,
+            mPlayerFlags & NuPlayer::Source::FLAG_CAN_SEEK);
+
+    return OK;
 }
 
 void NuPlayerDriver::notifyResetComplete() {
     Mutex::Autolock autoLock(mLock);
-    CHECK(mResetInProgress);
-    mResetInProgress = false;
+
+    CHECK_EQ(mState, STATE_RESET_IN_PROGRESS);
+    mState = STATE_IDLE;
+    mCondition.broadcast();
+}
+
+void NuPlayerDriver::notifySetSurfaceComplete() {
+    Mutex::Autolock autoLock(mLock);
+
+    CHECK(mSetSurfaceInProgress);
+    mSetSurfaceInProgress = false;
+
     mCondition.broadcast();
 }
 
@@ -357,12 +512,59 @@ status_t NuPlayerDriver::dump(int fd, const Vector<String16> &args) const {
     return OK;
 }
 
-void NuPlayerDriver::notifyListener(int msg, int ext1, int ext2) {
+void NuPlayerDriver::notifyListener(
+        int msg, int ext1, int ext2, const Parcel *in) {
     if (msg == MEDIA_PLAYBACK_COMPLETE || msg == MEDIA_ERROR) {
         mAtEOS = true;
     }
 
-    sendEvent(msg, ext1, ext2);
+    sendEvent(msg, ext1, ext2, in);
+}
+
+void NuPlayerDriver::notifySetDataSourceCompleted(status_t err) {
+    Mutex::Autolock autoLock(mLock);
+
+    CHECK_EQ(mState, STATE_SET_DATASOURCE_PENDING);
+
+    mAsyncResult = err;
+    mState = (err == OK) ? STATE_UNPREPARED : STATE_IDLE;
+    mCondition.broadcast();
+}
+
+void NuPlayerDriver::notifyPrepareCompleted(status_t err) {
+    Mutex::Autolock autoLock(mLock);
+
+    if (mState != STATE_PREPARING) {
+        // We were preparing asynchronously when the client called
+        // reset(), we sent a premature "prepared" notification and
+        // then initiated the reset. This notification is stale.
+        CHECK(mState == STATE_RESET_IN_PROGRESS || mState == STATE_IDLE);
+        return;
+    }
+
+    CHECK_EQ(mState, STATE_PREPARING);
+
+    mAsyncResult = err;
+
+    if (err == OK) {
+        if (mIsAsyncPrepare) {
+            notifyListener(MEDIA_PREPARED);
+        }
+        mState = STATE_PREPARED;
+    } else {
+        if (mIsAsyncPrepare) {
+            notifyListener(MEDIA_ERROR, MEDIA_ERROR_UNKNOWN, err);
+        }
+        mState = STATE_UNPREPARED;
+    }
+
+    mCondition.broadcast();
+}
+
+void NuPlayerDriver::notifyFlagsChanged(uint32_t flags) {
+    Mutex::Autolock autoLock(mLock);
+
+    mPlayerFlags = flags;
 }
 
 }  // namespace android

@@ -19,6 +19,7 @@
 
 #include <cutils/misc.h>
 #include <cutils/config_utils.h>
+#include <cutils/compiler.h>
 #include <utils/String8.h>
 #include <utils/Vector.h>
 #include <utils/SortedVector.h>
@@ -44,7 +45,7 @@ class AudioPolicyService :
 
 public:
     // for BinderService
-    static const char *getServiceName() { return "media.audio_policy"; }
+    static const char *getServiceName() ANDROID_API { return "media.audio_policy"; }
 
     virtual status_t    dump(int fd, const Vector<String16>& args);
 
@@ -64,9 +65,10 @@ public:
     virtual audio_io_handle_t getOutput(audio_stream_type_t stream,
                                         uint32_t samplingRate = 0,
                                         audio_format_t format = AUDIO_FORMAT_DEFAULT,
-                                        uint32_t channels = 0,
+                                        audio_channel_mask_t channelMask = 0,
                                         audio_output_flags_t flags =
-                                                AUDIO_OUTPUT_FLAG_NONE);
+                                                AUDIO_OUTPUT_FLAG_NONE,
+                                        const audio_offload_info_t *offloadInfo = NULL);
     virtual status_t startOutput(audio_io_handle_t output,
                                  audio_stream_type_t stream,
                                  int session = 0);
@@ -77,9 +79,7 @@ public:
     virtual audio_io_handle_t getInput(audio_source_t inputSource,
                                     uint32_t samplingRate = 0,
                                     audio_format_t format = AUDIO_FORMAT_DEFAULT,
-                                    uint32_t channels = 0,
-                                    audio_in_acoustics_t acoustics =
-                                            (audio_in_acoustics_t)0 /*AUDIO_IN_ACOUSTICS_NONE*/,
+                                    audio_channel_mask_t channelMask = 0,
                                     int audioSession = 0);
     virtual status_t startInput(audio_io_handle_t input);
     virtual status_t stopInput(audio_io_handle_t input);
@@ -97,8 +97,8 @@ public:
     virtual uint32_t getStrategyForStream(audio_stream_type_t stream);
     virtual audio_devices_t getDevicesForStream(audio_stream_type_t stream);
 
-    virtual audio_io_handle_t getOutputForEffect(effect_descriptor_t *desc);
-    virtual status_t registerEffect(effect_descriptor_t *desc,
+    virtual audio_io_handle_t getOutputForEffect(const effect_descriptor_t *desc);
+    virtual status_t registerEffect(const effect_descriptor_t *desc,
                                     audio_io_handle_t io,
                                     uint32_t strategy,
                                     int session,
@@ -106,6 +106,8 @@ public:
     virtual status_t unregisterEffect(int id);
     virtual status_t setEffectEnabled(int id, bool enabled);
     virtual bool isStreamActive(audio_stream_type_t stream, uint32_t inPastMs = 0) const;
+    virtual bool isStreamActiveRemotely(audio_stream_type_t stream, uint32_t inPastMs = 0) const;
+    virtual bool isSourceActive(audio_source_t source) const;
 
     virtual status_t queryDefaultPreProcessing(int audioSession,
                                               effect_descriptor_t *descriptors,
@@ -135,22 +137,25 @@ public:
     virtual status_t startTone(audio_policy_tone_t tone, audio_stream_type_t stream);
     virtual status_t stopTone();
     virtual status_t setVoiceVolume(float volume, int delayMs = 0);
-#if defined(QCOM_HARDWARE) && defined(QCOM_FM_ENABLED)
-    virtual status_t setFmVolume(float volume, int delayMs = 0);
-#endif
+    virtual bool isOffloadSupported(const audio_offload_info_t &config);
+
+            status_t doStopOutput(audio_io_handle_t output,
+                                  audio_stream_type_t stream,
+                                  int session = 0);
+            void doReleaseOutput(audio_io_handle_t output);
 
 private:
-                        AudioPolicyService();
+                        AudioPolicyService() ANDROID_API;
     virtual             ~AudioPolicyService();
 
             status_t dumpInternals(int fd);
 
     // Thread used for tone playback and to send audio config commands to audio flinger
-    // For tone playback, using a separate thread is necessary to avoid deadlock with mLock because startTone()
-    // and stopTone() are normally called with mLock locked and requesting a tone start or stop will cause
-    // calls to AudioPolicyService and an attempt to lock mLock.
-    // For audio config commands, it is necessary because audio flinger requires that the calling process (user)
-    // has permission to modify audio settings.
+    // For tone playback, using a separate thread is necessary to avoid deadlock with mLock because
+    // startTone() and stopTone() are normally called with mLock locked and requesting a tone start
+    // or stop will cause calls to AudioPolicyService and an attempt to lock mLock.
+    // For audio config commands, it is necessary because audio flinger requires that the calling
+    // process (user) has permission to modify audio settings.
     class AudioCommandThread : public Thread {
         class AudioCommand;
     public:
@@ -162,12 +167,11 @@ private:
             SET_VOLUME,
             SET_PARAMETERS,
             SET_VOICE_VOLUME,
-#if defined(QCOM_HARDWARE) && defined(QCOM_FM_ENABLED)
-            SET_FM_VOLUME
-#endif
+            STOP_OUTPUT,
+            RELEASE_OUTPUT
         };
 
-        AudioCommandThread (String8 name);
+        AudioCommandThread (String8 name, const wp<AudioPolicyService>& service);
         virtual             ~AudioCommandThread();
 
                     status_t    dump(int fd);
@@ -185,9 +189,11 @@ private:
                     status_t    parametersCommand(audio_io_handle_t ioHandle,
                                             const char *keyValuePairs, int delayMs = 0);
                     status_t    voiceVolumeCommand(float volume, int delayMs = 0);
-#if defined(QCOM_HARDWARE) && defined(QCOM_FM_ENABLED)
-                    status_t    fmVolumeCommand(float volume, int delayMs = 0);
-#endif
+                    void        stopOutputCommand(audio_io_handle_t output,
+                                                  audio_stream_type_t stream,
+                                                  int session);
+                    void        releaseOutputCommand(audio_io_handle_t output);
+
                     void        insertCommand_l(AudioCommand *command, int delayMs = 0);
 
     private:
@@ -232,12 +238,17 @@ private:
             float mVolume;
         };
 
-#if defined(QCOM_HARDWARE) && defined(QCOM_FM_ENABLED)
-        class FmVolumeData {
+        class StopOutputData {
         public:
-            float mVolume;
+            audio_io_handle_t mIO;
+            audio_stream_type_t mStream;
+            int mSession;
         };
-#endif
+
+        class ReleaseOutputData {
+        public:
+            audio_io_handle_t mIO;
+        };
 
         Mutex   mLock;
         Condition mWaitWorkCV;
@@ -245,6 +256,7 @@ private:
         ToneGenerator *mpToneGenerator;     // the tone generator
         AudioCommand mLastCommand;          // last processed command (used by dump)
         String8 mName;                      // string used by wake lock fo delayed commands
+        wp<AudioPolicyService> mService;
     };
 
     class EffectDesc {
@@ -329,6 +341,7 @@ private:
                             // device connection state  or routing
     sp<AudioCommandThread> mAudioCommandThread;     // audio commands thread
     sp<AudioCommandThread> mTonePlaybackThread;     // tone playback thread
+    sp<AudioCommandThread> mOutputCommandThread;    // process stop and release output
     struct audio_policy_device *mpAudioPolicyDev;
     struct audio_policy *mpAudioPolicy;
     KeyedVector< audio_source_t, InputSourceDesc* > mInputSources;

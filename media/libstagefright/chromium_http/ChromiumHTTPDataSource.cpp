@@ -65,7 +65,10 @@ status_t ChromiumHTTPDataSource::connect(
     if (getUID(&uid)) {
         mDelegate->setUID(uid);
     }
+
+#if defined(LOG_NDEBUG) && !LOG_NDEBUG
     LOG_PRI(ANDROID_LOG_VERBOSE, LOG_TAG, "connect on behalf of uid %d", uid);
+#endif
 
     return connect_l(uri, headers, offset);
 }
@@ -78,12 +81,10 @@ status_t ChromiumHTTPDataSource::connect_l(
         disconnect_l();
     }
 
-    if (!(mFlags & kFlagIncognito)) {
-        LOG_PRI(ANDROID_LOG_INFO, LOG_TAG, "connect to %s @%lld", uri, offset);
-    } else {
-        LOG_PRI(ANDROID_LOG_INFO, LOG_TAG,
+#if defined(LOG_NDEBUG) && !LOG_NDEBUG
+    LOG_PRI(ANDROID_LOG_VERBOSE, LOG_TAG,
                 "connect to <URL suppressed> @%lld", offset);
-    }
+#endif
 
     mURI = uri;
     mContentType = String8("application/octet-stream");
@@ -242,19 +243,6 @@ status_t ChromiumHTTPDataSource::getSize(off64_t *size) {
     return OK;
 }
 
-#ifdef QCOM_HARDWARE
-status_t ChromiumHTTPDataSource::getCurrentOffset(off64_t *size) {
-    Mutex::Autolock autoLock(mLock);
-
-     if(mCurrentOffset < 0) {
-        return ERROR_UNSUPPORTED;
-     }
-    *size = mCurrentOffset;
-    return OK;
-
-}
-#endif
-
 uint32_t ChromiumHTTPDataSource::flags() {
     return kWantsPrefetching | kIsHTTPBasedSource;
 }
@@ -350,6 +338,12 @@ status_t ChromiumHTTPDataSource::reconnectAtOffset(off64_t offset) {
     }
 
     return err;
+}
+
+// static
+status_t ChromiumHTTPDataSource::UpdateProxyConfig(
+        const char *host, int32_t port, const char *exclusionList) {
+    return SfDelegate::UpdateProxyConfig(host, port, exclusionList);
 }
 
 }  // namespace android

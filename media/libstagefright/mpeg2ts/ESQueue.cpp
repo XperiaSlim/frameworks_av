@@ -31,10 +31,13 @@
 
 #include "include/avc_utils.h"
 
+#include <netinet/in.h>
+
 namespace android {
 
-ElementaryStreamQueue::ElementaryStreamQueue(Mode mode)
-    : mMode(mode) {
+ElementaryStreamQueue::ElementaryStreamQueue(Mode mode, uint32_t flags)
+    : mMode(mode),
+      mFlags(flags) {
 }
 
 sp<MetaData> ElementaryStreamQueue::getFormat() {
@@ -144,9 +147,9 @@ status_t ElementaryStreamQueue::appendData(
                 }
 
                 if (startOffset > 0) {
-                    ALOGI("found something resembling an H.264/MPEG syncword at "
-                         "offset %ld",
-                         startOffset);
+                    ALOGI("found something resembling an H.264/MPEG syncword "
+                          "at offset %d",
+                          startOffset);
                 }
 
                 data = &ptr[startOffset];
@@ -177,9 +180,9 @@ status_t ElementaryStreamQueue::appendData(
                 }
 
                 if (startOffset > 0) {
-                    ALOGI("found something resembling an H.264/MPEG syncword at "
-                         "offset %ld",
-                         startOffset);
+                    ALOGI("found something resembling an H.264/MPEG syncword "
+                          "at offset %d",
+                          startOffset);
                 }
 
                 data = &ptr[startOffset];
@@ -210,8 +213,9 @@ status_t ElementaryStreamQueue::appendData(
                 }
 
                 if (startOffset > 0) {
-                    ALOGI("found something resembling an AAC syncword at offset %ld",
-                         startOffset);
+                    ALOGI("found something resembling an AAC syncword at "
+                          "offset %d",
+                          startOffset);
                 }
 
                 data = &ptr[startOffset];
@@ -238,12 +242,17 @@ status_t ElementaryStreamQueue::appendData(
 
                 if (startOffset > 0) {
                     ALOGI("found something resembling an MPEG audio "
-                         "syncword at offset %ld",
-                         startOffset);
+                          "syncword at offset %d",
+                          startOffset);
                 }
 
                 data = &ptr[startOffset];
                 size -= startOffset;
+                break;
+            }
+
+            case PCM_AUDIO:
+            {
                 break;
             }
 
@@ -289,6 +298,31 @@ status_t ElementaryStreamQueue::appendData(
 }
 
 sp<ABuffer> ElementaryStreamQueue::dequeueAccessUnit() {
+    if ((mFlags & kFlag_AlignedData) && mMode == H264) {
+        if (mRangeInfos.empty()) {
+            return NULL;
+        }
+
+        RangeInfo info = *mRangeInfos.begin();
+        mRangeInfos.erase(mRangeInfos.begin());
+
+        sp<ABuffer> accessUnit = new ABuffer(info.mLength);
+        memcpy(accessUnit->data(), mBuffer->data(), info.mLength);
+        accessUnit->meta()->setInt64("timeUs", info.mTimestampUs);
+
+        memmove(mBuffer->data(),
+                mBuffer->data() + info.mLength,
+                mBuffer->size() - info.mLength);
+
+        mBuffer->setRange(0, mBuffer->size() - info.mLength);
+
+        if (mFormat == NULL) {
+            mFormat = MakeAVCCodecSpecificData(accessUnit);
+        }
+
+        return accessUnit;
+    }
+
     switch (mMode) {
         case H264:
             return dequeueAccessUnitH264();
@@ -298,17 +332,93 @@ sp<ABuffer> ElementaryStreamQueue::dequeueAccessUnit() {
             return dequeueAccessUnitMPEGVideo();
         case MPEG4_VIDEO:
             return dequeueAccessUnitMPEG4Video();
+        case PCM_AUDIO:
+            return dequeueAccessUnitPCMAudio();
         default:
             CHECK_EQ((unsigned)mMode, (unsigned)MPEG_AUDIO);
             return dequeueAccessUnitMPEGAudio();
     }
 }
 
-sp<ABuffer> ElementaryStreamQueue::dequeueAccessUnitAAC() {
-    int64_t timeUs;
+sp<ABuffer> ElementaryStreamQueue::dequeueAccessUnitPCMAudio() {
+    if (mBuffer->size() < 4) {
+        return NULL;
+    }
 
+    ABitReader bits(mBuffer->data(), 4);
+    CHECK_EQ(bits.getBits(8), 0xa0);
+    unsigned numAUs = bits.getBits(8);
+    bits.skipBits(8);
+    unsigned quantization_word_length = bits.getBits(2);
+    unsigned audio_sampling_frequency = bits.getBits(3);
+    unsigned num_channels = bits.getBits(3);
+
+    CHECK_EQ(audio_sampling_frequency, 2);  // 48kHz
+    CHECK_EQ(num_channels, 1u);  // stereo!
+
+    if (mFormat == NULL) {
+        mFormat = new MetaData;
+        mFormat->setCString(kKeyMIMEType, MEDIA_MIMETYPE_AUDIO_RAW);
+        mFormat->setInt32(kKeyChannelCount, 2);
+        mFormat->setInt32(kKeySampleRate, 48000);
+    }
+
+    static const size_t kFramesPerAU = 80;
+    size_t frameSize = 2 /* numChannels */ * sizeof(int16_t);
+
+    size_t payloadSize = numAUs * frameSize * kFramesPerAU;
+
+    if (mBuffer->size() < 4 + payloadSize) {
+        return NULL;
+    }
+
+    sp<ABuffer> accessUnit = new ABuffer(payloadSize);
+    memcpy(accessUnit->data(), mBuffer->data() + 4, payloadSize);
+
+    int64_t timeUs = fetchTimestamp(payloadSize + 4);
+    CHECK_GE(timeUs, 0ll);
+    accessUnit->meta()->setInt64("timeUs", timeUs);
+
+    int16_t *ptr = (int16_t *)accessUnit->data();
+    for (size_t i = 0; i < payloadSize / sizeof(int16_t); ++i) {
+        ptr[i] = ntohs(ptr[i]);
+    }
+
+    memmove(
+            mBuffer->data(),
+            mBuffer->data() + 4 + payloadSize,
+            mBuffer->size() - 4 - payloadSize);
+
+    mBuffer->setRange(0, mBuffer->size() - 4 - payloadSize);
+
+    return accessUnit;
+}
+
+sp<ABuffer> ElementaryStreamQueue::dequeueAccessUnitAAC() {
+    if (mBuffer->size() == 0) {
+        return NULL;
+    }
+
+    CHECK(!mRangeInfos.empty());
+
+    const RangeInfo &info = *mRangeInfos.begin();
+    if (mBuffer->size() < info.mLength) {
+        return NULL;
+    }
+
+    CHECK_GE(info.mTimestampUs, 0ll);
+
+    // The idea here is consume all AAC frames starting at offsets before
+    // info.mLength so we can assign a meaningful timestamp without
+    // having to interpolate.
+    // The final AAC frame may well extend into the next RangeInfo but
+    // that's ok.
     size_t offset = 0;
-    while (offset + 7 <= mBuffer->size()) {
+    while (offset < info.mLength) {
+        if (offset + 7 > mBuffer->size()) {
+            return NULL;
+        }
+
         ABitReader bits(mBuffer->data() + offset, mBuffer->size() - offset);
 
         // adts_fixed_header
@@ -361,24 +471,15 @@ sp<ABuffer> ElementaryStreamQueue::dequeueAccessUnitAAC() {
         }
 
         if (offset + aac_frame_length > mBuffer->size()) {
-            break;
+            return NULL;
         }
 
         size_t headerSize = protection_absent ? 7 : 9;
 
-        int64_t tmpUs = fetchTimestamp(aac_frame_length);
-        CHECK_GE(tmpUs, 0ll);
-
-        if (offset == 0) {
-            timeUs = tmpUs;
-        }
-
         offset += aac_frame_length;
     }
 
-    if (offset == 0) {
-        return NULL;
-    }
+    int64_t timeUs = fetchTimestamp(offset);
 
     sp<ABuffer> accessUnit = new ABuffer(offset);
     memcpy(accessUnit->data(), mBuffer->data(), offset);
@@ -408,11 +509,6 @@ int64_t ElementaryStreamQueue::fetchTimestamp(size_t size) {
 
         if (info->mLength > size) {
             info->mLength -= size;
-
-            if (first) {
-                info->mTimestampUs = -1;
-            }
-
             size = 0;
         } else {
             size -= info->mLength;
@@ -420,6 +516,7 @@ int64_t ElementaryStreamQueue::fetchTimestamp(size_t size) {
             mRangeInfos.erase(mRangeInfos.begin());
             info = NULL;
         }
+
     }
 
     if (timeUs == 0ll) {
@@ -436,8 +533,8 @@ struct NALPosition {
 
 sp<ABuffer> ElementaryStreamQueue::dequeueAccessUnitH264() {
     const uint8_t *data = mBuffer->data();
-    size_t size = mBuffer->size();
 
+    size_t size = mBuffer->size();
     Vector<NALPosition> nals;
 
     size_t totalSize = 0;
@@ -447,7 +544,7 @@ sp<ABuffer> ElementaryStreamQueue::dequeueAccessUnitH264() {
     size_t nalSize;
     bool foundSlice = false;
     while ((err = getNextNALUnit(&data, &size, &nalStart, &nalSize)) == OK) {
-        CHECK_GT(nalSize, 0u);
+        if (nalSize == 0) continue;
 
         unsigned nalType = nalStart[0] & 0x1f;
         bool flush = false;

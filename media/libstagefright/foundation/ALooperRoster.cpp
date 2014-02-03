@@ -71,6 +71,20 @@ void ALooperRoster::unregisterHandler(ALooper::handler_id handlerID) {
     mHandlers.removeItemsAt(index);
 }
 
+void ALooperRoster::unregisterStaleHandlers() {
+    Mutex::Autolock autoLock(mLock);
+
+    for (size_t i = mHandlers.size(); i-- > 0;) {
+        const HandlerInfo &info = mHandlers.valueAt(i);
+
+        sp<ALooper> looper = info.mLooper.promote();
+        if (looper == NULL) {
+            ALOGV("Unregistering stale handler %d", mHandlers.keyAt(i));
+            mHandlers.removeItemsAt(i);
+        }
+    }
+}
+
 status_t ALooperRoster::postMessage(
         const sp<AMessage> &msg, int64_t delayUs) {
     Mutex::Autolock autoLock(mLock);
@@ -82,7 +96,8 @@ status_t ALooperRoster::postMessage_l(
     ssize_t index = mHandlers.indexOfKey(msg->target());
 
     if (index < 0) {
-        ALOGW("failed to post message. Target handler not registered.");
+        ALOGW("failed to post message '%s'. Target handler not registered.",
+              msg->debugString().c_str());
         return -ENOENT;
     }
 

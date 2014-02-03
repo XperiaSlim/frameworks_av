@@ -174,7 +174,10 @@ static int FwdLockFile_DeriveKeys(FwdLockFile_Session_t * pSession) {
         AES_KEY sessionRoundKeys;
         unsigned char value[KEY_SIZE];
         unsigned char key[KEY_SIZE];
-    } *pData = malloc(sizeof *pData);
+    };
+
+    const size_t kSize = sizeof(struct FwdLockFile_DeriveKeys_Data);
+    struct FwdLockFile_DeriveKeys_Data *pData = malloc(kSize);
     if (pData == NULL) {
         result = FALSE;
     } else {
@@ -202,7 +205,7 @@ static int FwdLockFile_DeriveKeys(FwdLockFile_Session_t * pSession) {
         if (!result) {
             errno = ENOSYS;
         }
-        memset(pData, 0, sizeof pData); // Zero out key data.
+        memset(pData, 0, kSize); // Zero out key data.
         free(pData);
     }
     return result;
@@ -291,20 +294,6 @@ int FwdLockFile_attach(int fileDesc) {
         }
     }
     return (sessionId >= 0) ? 0 : -1;
-}
-
-int FwdLockFile_open(const char *pFilename) {
-    int fileDesc = open(pFilename, O_RDONLY);
-    if (fileDesc < 0) {
-        ALOGE("failed to open file '%s': %s", pFilename, strerror(errno));
-        return fileDesc;
-    }
-
-    if (FwdLockFile_attach(fileDesc) < 0) {
-        (void)close(fileDesc);
-        fileDesc = -1;
-    }
-    return fileDesc;
 }
 
 ssize_t FwdLockFile_read(int fileDesc, void *pBuffer, size_t numBytes) {

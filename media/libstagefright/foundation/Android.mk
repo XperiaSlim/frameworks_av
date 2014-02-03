@@ -10,7 +10,9 @@ LOCAL_SRC_FILES:=                 \
     ALooper.cpp                   \
     ALooperRoster.cpp             \
     AMessage.cpp                  \
+    ANetworkSession.cpp           \
     AString.cpp                   \
+    ParsedMessage.cpp             \
     base64.cpp                    \
     hexdump.cpp
 
@@ -20,6 +22,7 @@ LOCAL_C_INCLUDES:= \
 LOCAL_SHARED_LIBRARIES := \
         libbinder         \
         libutils          \
+        liblog
 
 LOCAL_CFLAGS += -Wno-multichar
 

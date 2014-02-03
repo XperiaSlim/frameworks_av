@@ -1,6 +1,5 @@
 /*
  * Copyright (C) 2010 The Android Open Source Project
- * Copyright (c) 2012, Code Aurora Forum. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -37,7 +36,7 @@ AMRWriter::AMRWriter(const char *filename)
       mPaused(false),
       mResumed(false) {
 
-    mFd = open(filename, O_CREAT | O_LARGEFILE | O_TRUNC | O_RDWR);
+    mFd = open(filename, O_CREAT | O_LARGEFILE | O_TRUNC | O_RDWR, S_IRUSR | S_IWUSR);
     if (mFd >= 0) {
         mInitCheck = OK;
     }
@@ -255,11 +254,14 @@ status_t AMRWriter::threadFunc() {
         if (n < (ssize_t)buffer->range_length()) {
             buffer->release();
             buffer = NULL;
-
+            err = ERROR_IO;
             break;
         }
 
-        // XXX: How to tell it is stopped prematurely?
+        if (err != OK) {
+            break;
+        }
+
         if (stoppedPrematurely) {
             stoppedPrematurely = false;
         }
@@ -268,14 +270,14 @@ status_t AMRWriter::threadFunc() {
         buffer = NULL;
     }
 
-    if (stoppedPrematurely) {
-        notify(MEDIA_RECORDER_EVENT_INFO, MEDIA_RECORDER_TRACK_INFO_COMPLETION_STATUS, UNKNOWN_ERROR);
+    if ((err == OK || err == ERROR_END_OF_STREAM) && stoppedPrematurely) {
+        err = ERROR_MALFORMED;
     }
 
     close(mFd);
     mFd = -1;
     mReachedEOS = true;
-    if ((err == ERROR_END_OF_STREAM)||(err = -ETIMEDOUT)) {
+    if (err == ERROR_END_OF_STREAM) {
         return OK;
     }
     return err;

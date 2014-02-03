@@ -24,7 +24,7 @@
 #include <media/IMediaPlayer.h>
 #include <media/IStreamSource.h>
 
-#include <gui/ISurfaceTexture.h>
+#include <gui/IGraphicBufferProducer.h>
 #include <utils/String8.h>
 
 namespace android {
@@ -55,6 +55,7 @@ enum {
     SET_PARAMETER,
     GET_PARAMETER,
     SET_RETRANSMIT_ENDPOINT,
+    GET_RETRANSMIT_ENDPOINT,
     SET_NEXT_PLAYER,
 };
 
@@ -112,12 +113,12 @@ public:
         return reply.readInt32();
     }
 
-    // pass the buffered ISurfaceTexture to the media player service
-    status_t setVideoSurfaceTexture(const sp<ISurfaceTexture>& surfaceTexture)
+    // pass the buffered IGraphicBufferProducer to the media player service
+    status_t setVideoSurfaceTexture(const sp<IGraphicBufferProducer>& bufferProducer)
     {
         Parcel data, reply;
         data.writeInterfaceToken(IMediaPlayer::getInterfaceDescriptor());
-        sp<IBinder> b(surfaceTexture->asBinder());
+        sp<IBinder> b(bufferProducer->asBinder());
         data.writeStrongBinder(b);
         remote()->transact(SET_VIDEO_SURFACETEXTURE, data, &reply);
         return reply.readInt32();
@@ -292,7 +293,8 @@ public:
         return remote()->transact(GET_PARAMETER, data, reply);
     }
 
-    status_t setRetransmitEndpoint(const struct sockaddr_in* endpoint) {
+    status_t setRetransmitEndpoint(const struct sockaddr_in* endpoint)
+    {
         Parcel data, reply;
         status_t err;
 
@@ -318,6 +320,23 @@ public:
         data.writeStrongBinder(b);
         remote()->transact(SET_NEXT_PLAYER, data, &reply);
         return reply.readInt32();
+    }
+
+    status_t getRetransmitEndpoint(struct sockaddr_in* endpoint)
+    {
+        Parcel data, reply;
+        status_t err;
+
+        data.writeInterfaceToken(IMediaPlayer::getInterfaceDescriptor());
+        err = remote()->transact(GET_RETRANSMIT_ENDPOINT, data, &reply);
+
+        if ((OK != err) || (OK != (err = reply.readInt32()))) {
+            return err;
+        }
+
+        data.read(endpoint, sizeof(*endpoint));
+
+        return err;
     }
 };
 
@@ -364,9 +383,9 @@ status_t BnMediaPlayer::onTransact(
         }
         case SET_VIDEO_SURFACETEXTURE: {
             CHECK_INTERFACE(IMediaPlayer, data, reply);
-            sp<ISurfaceTexture> surfaceTexture =
-                    interface_cast<ISurfaceTexture>(data.readStrongBinder());
-            reply->writeInt32(setVideoSurfaceTexture(surfaceTexture));
+            sp<IGraphicBufferProducer> bufferProducer =
+                    interface_cast<IGraphicBufferProducer>(data.readStrongBinder());
+            reply->writeInt32(setVideoSurfaceTexture(bufferProducer));
             return NO_ERROR;
         } break;
         case PREPARE_ASYNC: {
@@ -498,11 +517,24 @@ status_t BnMediaPlayer::onTransact(
             } else {
                 reply->writeInt32(setRetransmitEndpoint(NULL));
             }
+
+            return NO_ERROR;
+        } break;
+        case GET_RETRANSMIT_ENDPOINT: {
+            CHECK_INTERFACE(IMediaPlayer, data, reply);
+
+            struct sockaddr_in endpoint;
+            status_t res = getRetransmitEndpoint(&endpoint);
+
+            reply->writeInt32(res);
+            reply->write(&endpoint, sizeof(endpoint));
+
             return NO_ERROR;
         } break;
         case SET_NEXT_PLAYER: {
             CHECK_INTERFACE(IMediaPlayer, data, reply);
             reply->writeInt32(setNextPlayer(interface_cast<IMediaPlayer>(data.readStrongBinder())));
+
             return NO_ERROR;
         } break;
         default:

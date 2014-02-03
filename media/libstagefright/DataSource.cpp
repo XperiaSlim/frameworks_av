@@ -1,6 +1,5 @@
 /*
  * Copyright (C) 2009 The Android Open Source Project
- * Copyright (c) 2012, Code Aurora Forum. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,22 +17,21 @@
 #include "include/AMRExtractor.h"
 
 #if CHROMIUM_AVAILABLE
-#include "include/DataUriSource.h"
+#include "include/chromium_http_stub.h"
 #endif
 
-#include "include/MP3Extractor.h"
-#include "include/MPEG4Extractor.h"
-#include "include/WAVExtractor.h"
-#include "include/OggExtractor.h"
-#include "include/MPEG2PSExtractor.h"
-#include "include/MPEG2TSExtractor.h"
-#include "include/NuCachedSource2.h"
-#include "include/HTTPBase.h"
+#include "include/AACExtractor.h"
 #include "include/DRMExtractor.h"
 #include "include/FLACExtractor.h"
-#include "include/AACExtractor.h"
+#include "include/HTTPBase.h"
+#include "include/MP3Extractor.h"
+#include "include/MPEG2PSExtractor.h"
+#include "include/MPEG2TSExtractor.h"
+#include "include/MPEG4Extractor.h"
+#include "include/NuCachedSource2.h"
+#include "include/OggExtractor.h"
+#include "include/WAVExtractor.h"
 #include "include/WVMExtractor.h"
-#include "include/ExtendedExtractor.h"
 
 #include "matroska/MatroskaExtractor.h"
 
@@ -41,9 +39,6 @@
 #include <media/stagefright/DataSource.h>
 #include <media/stagefright/FileSource.h>
 #include <media/stagefright/MediaErrors.h>
-
-#include <media/stagefright/MediaDefs.h>
-
 #include <utils/String8.h>
 
 #include <cutils/properties.h>
@@ -63,80 +58,80 @@ bool DataSource::getUInt16(off64_t offset, uint16_t *x) {
     return true;
 }
 
+bool DataSource::getUInt24(off64_t offset, uint32_t *x) {
+    *x = 0;
+
+    uint8_t byte[3];
+    if (readAt(offset, byte, 3) != 3) {
+        return false;
+    }
+
+    *x = (byte[0] << 16) | (byte[1] << 8) | byte[2];
+
+    return true;
+}
+
+bool DataSource::getUInt32(off64_t offset, uint32_t *x) {
+    *x = 0;
+
+    uint32_t tmp;
+    if (readAt(offset, &tmp, 4) != 4) {
+        return false;
+    }
+
+    *x = ntohl(tmp);
+
+    return true;
+}
+
+bool DataSource::getUInt64(off64_t offset, uint64_t *x) {
+    *x = 0;
+
+    uint64_t tmp;
+    if (readAt(offset, &tmp, 8) != 8) {
+        return false;
+    }
+
+    *x = ntoh64(tmp);
+
+    return true;
+}
+
 status_t DataSource::getSize(off64_t *size) {
     *size = 0;
 
     return ERROR_UNSUPPORTED;
 }
 
-#ifdef QCOM_HARDWARE
-status_t DataSource::getCurrentOffset(off64_t *size) {
-    *size = 0;
-
-    return ERROR_UNSUPPORTED;
-}
-#endif
-
 ////////////////////////////////////////////////////////////////////////////////
 
 Mutex DataSource::gSnifferMutex;
 List<DataSource::SnifferFunc> DataSource::gSniffers;
-#ifdef QCOM_HARDWARE
-List<DataSource::SnifferFunc>::iterator DataSource::extendedSnifferPosition;
-#endif
+bool DataSource::gSniffersRegistered = false;
 
 bool DataSource::sniff(
         String8 *mimeType, float *confidence, sp<AMessage> *meta) {
-
     *mimeType = "";
     *confidence = 0.0f;
     meta->clear();
-    Mutex::Autolock autoLock(gSnifferMutex);
+
+    {
+        Mutex::Autolock autoLock(gSnifferMutex);
+        if (!gSniffersRegistered) {
+            return false;
+        }
+    }
+
     for (List<SnifferFunc>::iterator it = gSniffers.begin();
          it != gSniffers.end(); ++it) {
-
-#ifdef QCOM_HARDWARE
-        //Dont call the first sniffer from extended extarctor
-        if(it == extendedSnifferPosition)
-            continue;
-#endif
-
         String8 newMimeType;
-        float newConfidence = 0.0;
+        float newConfidence;
         sp<AMessage> newMeta;
         if ((*it)(this, &newMimeType, &newConfidence, &newMeta)) {
             if (newConfidence > *confidence) {
                 *mimeType = newMimeType;
                 *confidence = newConfidence;
                 *meta = newMeta;
-#ifdef QCOM_HARDWARE
-                if(*confidence >= 0.6f) {
-
-                    ALOGV("Ignore other Sniffers - confidence = %f , mimeType = %s",*confidence,mimeType->string());
-
-                    char value[PROPERTY_VALUE_MAX];
-                    if( (!strcasecmp((*mimeType).string(), MEDIA_MIMETYPE_CONTAINER_MPEG4)) &&
-                        (property_get("mmp.enable.3g2", value, NULL)) &&
-                        (!strcasecmp(value, "true") || !strcmp(value, "1"))) {
-
-                        //Incase of mimeType MPEG4 call the extended parser sniffer to check
-                        //if this is fragmented or not.
-                        ALOGV("calling Extended Sniff if mimeType = %s ",(*mimeType).string());
-                        String8 tmpMimeType;
-                        float tmpConfidence = 0.0 ;
-                        sp<AMessage> tmpMeta;
-                        (*extendedSnifferPosition)(this, &tmpMimeType, &tmpConfidence, &tmpMeta);
-                        if (tmpConfidence > *confidence) {
-                            *mimeType = tmpMimeType;
-                            *confidence = tmpConfidence;
-                            *meta = tmpMeta;
-                            ALOGV("Confidence of Extended sniffer greater than previous sniffer ");
-                        }
-                    }
-
-                    break;
-                }
-#endif
             }
         }
     }
@@ -145,9 +140,7 @@ bool DataSource::sniff(
 }
 
 // static
-void DataSource::RegisterSniffer(SnifferFunc func, bool isExtendedExtractor) {
-    Mutex::Autolock autoLock(gSnifferMutex);
-
+void DataSource::RegisterSniffer_l(SnifferFunc func) {
     for (List<SnifferFunc>::iterator it = gSniffers.begin();
          it != gSniffers.end(); ++it) {
         if (*it == func) {
@@ -156,37 +149,33 @@ void DataSource::RegisterSniffer(SnifferFunc func, bool isExtendedExtractor) {
     }
 
     gSniffers.push_back(func);
-
-#ifdef QCOM_HARDWARE
-    if(isExtendedExtractor) {
-        extendedSnifferPosition = gSniffers.end();
-        extendedSnifferPosition--;
-    }
-#endif
 }
 
 // static
 void DataSource::RegisterDefaultSniffers() {
-    RegisterSniffer(SniffMPEG4);
-    RegisterSniffer(SniffMatroska);
-    RegisterSniffer(SniffOgg);
-    RegisterSniffer(SniffWAV);
-    RegisterSniffer(SniffFLAC);
-    RegisterSniffer(SniffAMR);
-    RegisterSniffer(SniffMPEG2TS);
-    RegisterSniffer(SniffMP3);
-    RegisterSniffer(SniffAAC);
-    RegisterSniffer(SniffMPEG2PS);
-    RegisterSniffer(SniffWVM);
-#ifdef QCOM_HARDWARE
-    ExtendedExtractor::RegisterSniffers();
-#endif
+    Mutex::Autolock autoLock(gSnifferMutex);
+    if (gSniffersRegistered) {
+        return;
+    }
+
+    RegisterSniffer_l(SniffMPEG4);
+    RegisterSniffer_l(SniffMatroska);
+    RegisterSniffer_l(SniffOgg);
+    RegisterSniffer_l(SniffWAV);
+    RegisterSniffer_l(SniffFLAC);
+    RegisterSniffer_l(SniffAMR);
+    RegisterSniffer_l(SniffMPEG2TS);
+    RegisterSniffer_l(SniffMP3);
+    RegisterSniffer_l(SniffAAC);
+    RegisterSniffer_l(SniffMPEG2PS);
+    RegisterSniffer_l(SniffWVM);
 
     char value[PROPERTY_VALUE_MAX];
     if (property_get("drm.service.enabled", value, NULL)
             && (!strcmp(value, "1") || !strcasecmp(value, "true"))) {
-        RegisterSniffer(SniffDRM);
+        RegisterSniffer_l(SniffDRM);
     }
+    gSniffersRegistered = true;
 }
 
 // static
@@ -234,7 +223,7 @@ sp<DataSource> DataSource::CreateFromURI(
 
 # if CHROMIUM_AVAILABLE
     } else if (!strncasecmp("data:", uri, 5)) {
-        source = new DataUriSource(uri);
+        source = createDataUriSource(uri);
 #endif
     } else {
         // Assume it's a filename.

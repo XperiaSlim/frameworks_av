@@ -70,6 +70,7 @@ public:
         GET_ALL_SUPPORT_INFO,
         OPEN_DECRYPT_SESSION,
         OPEN_DECRYPT_SESSION_FROM_URI,
+        OPEN_DECRYPT_SESSION_FOR_STREAMING,
         CLOSE_DECRYPT_SESSION,
         INITIALIZE_DECRYPT_UNIT,
         DECRYPT,
@@ -92,8 +93,6 @@ public:
     virtual status_t setDrmServiceListener(
             int uniqueId, const sp<IDrmServiceListener>& infoListener) = 0;
 
-    virtual status_t installDrmEngine(int uniqueId, const String8& drmEngineFile) = 0;
-
     virtual DrmConstraints* getConstraints(
             int uniqueId, const String8* path, const int action) = 0;
 
@@ -108,7 +107,7 @@ public:
     virtual status_t saveRights(int uniqueId, const DrmRights& drmRights,
             const String8& rightsPath, const String8& contentPath) = 0;
 
-    virtual String8 getOriginalMimeType(int uniqueId, const String8& path) = 0;
+    virtual String8 getOriginalMimeType(int uniqueId, const String8& path, int fd) = 0;
 
     virtual int getDrmObjectType(
             int uniqueId, const String8& path, const String8& mimeType) = 0;
@@ -146,6 +145,9 @@ public:
     virtual DecryptHandle* openDecryptSession(
                 int uniqueId, const char* uri, const char* mime) = 0;
 
+    virtual DecryptHandle* openDecryptSession(
+            int uniqueId, const DrmBuffer& buf, const String8& mimeType) = 0;
+
     virtual status_t closeDecryptSession(int uniqueId, DecryptHandle* decryptHandle) = 0;
 
     virtual status_t initializeDecryptUnit(int uniqueId, DecryptHandle* decryptHandle,
@@ -181,8 +183,6 @@ public:
     virtual status_t setDrmServiceListener(
             int uniqueId, const sp<IDrmServiceListener>& infoListener);
 
-    virtual status_t installDrmEngine(int uniqueId, const String8& drmEngineFile);
-
     virtual DrmConstraints* getConstraints(int uniqueId, const String8* path, const int action);
 
     virtual DrmMetadata* getMetadata(int uniqueId, const String8* path);
@@ -196,7 +196,7 @@ public:
     virtual status_t saveRights(int uniqueId, const DrmRights& drmRights,
             const String8& rightsPath, const String8& contentPath);
 
-    virtual String8 getOriginalMimeType(int uniqueId, const String8& path);
+    virtual String8 getOriginalMimeType(int uniqueId, const String8& path, int fd);
 
     virtual int getDrmObjectType(int uniqueId, const String8& path, const String8& mimeType);
 
@@ -231,6 +231,9 @@ public:
 
     virtual DecryptHandle* openDecryptSession(
                 int uniqueId, const char* uri, const char* mime);
+
+    virtual DecryptHandle* openDecryptSession(
+            int uniqueId, const DrmBuffer& buf, const String8& mimeType);
 
     virtual status_t closeDecryptSession(int uniqueId, DecryptHandle* decryptHandle);
 

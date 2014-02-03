@@ -25,8 +25,12 @@ namespace android {
 struct ABuffer;
 
 struct NuPlayer::Renderer : public AHandler {
+    enum Flags {
+        FLAG_REAL_TIME = 1,
+    };
     Renderer(const sp<MediaPlayerBase::AudioSink> &sink,
-             const sp<AMessage> &notify);
+             const sp<AMessage> &notify,
+             uint32_t flags = 0);
 
     void queueBuffer(
             bool audio,
@@ -45,9 +49,11 @@ struct NuPlayer::Renderer : public AHandler {
     void resume();
 
     enum {
-        kWhatEOS                = 'eos ',
-        kWhatFlushComplete      = 'fluC',
-        kWhatPosition           = 'posi',
+        kWhatEOS                 = 'eos ',
+        kWhatFlushComplete       = 'fluC',
+        kWhatPosition            = 'posi',
+        kWhatVideoRenderingStart = 'vdrd',
+        kWhatMediaRenderingStart = 'mdrd',
     };
 
 protected:
@@ -78,6 +84,7 @@ private:
 
     sp<MediaPlayerBase::AudioSink> mAudioSink;
     sp<AMessage> mNotify;
+    uint32_t mFlags;
     List<QueueEntry> mAudioQueue;
     List<QueueEntry> mVideoQueue;
     uint32_t mNumFramesWritten;
@@ -99,9 +106,9 @@ private:
     bool mSyncQueues;
 
     bool mPaused;
-#ifdef QCOM_HARDWARE
-    bool mWasPaused; // if paused then store the info
-#endif
+    bool mVideoRenderingStarted;
+    int32_t mVideoRenderingStartGeneration;
+    int32_t mAudioRenderingStartGeneration;
 
     int64_t mLastPositionUpdateUs;
     int64_t mVideoLateByUs;
@@ -111,6 +118,9 @@ private:
 
     void onDrainVideoQueue();
     void postDrainVideoQueue();
+
+    void prepareForMediaRenderingStart();
+    void notifyIfMediaRenderingStarted();
 
     void onQueueBuffer(const sp<AMessage> &msg);
     void onQueueEOS(const sp<AMessage> &msg);
@@ -123,6 +133,7 @@ private:
     void notifyFlushComplete(bool audio);
     void notifyPosition();
     void notifyVideoLateBy(int64_t lateByUs);
+    void notifyVideoRenderingStart();
 
     void flushQueue(List<QueueEntry> *queue);
     bool dropBufferWhileFlushing(bool audio, const sp<AMessage> &msg);

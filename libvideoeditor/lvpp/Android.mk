@@ -50,15 +50,16 @@ LOCAL_SHARED_LIBRARIES :=     \
     libaudioutils             \
     libbinder                 \
     libcutils                 \
+    liblog                    \
     libEGL                    \
     libGLESv2                 \
     libgui                    \
     libmedia                  \
-    libmedia_native           \
     libdrmframework           \
     libstagefright            \
     libstagefright_foundation \
     libstagefright_omx        \
+    libsync                   \
     libui                     \
     libutils                  \
     libvideoeditor_osal       \

@@ -41,9 +41,6 @@ I420ColorConverter::I420ColorConverter() {
     // Fill the function pointers.
     getI420ColorConverter(this);
 
-#ifdef QCOM_HARDWARE
-    this->openColorConverterLib();
-#endif
     ALOGI("I420ColorConverter: libI420colorconvert.so loaded");
 }
 
@@ -52,10 +49,6 @@ bool I420ColorConverter::isLoaded() {
 }
 
 I420ColorConverter::~I420ColorConverter() {
-
-#ifdef QCOM_HARDWARE
-    this->closeColorConverterLib();
-#endif
     if (mHandle) {
         dlclose(mHandle);
     }

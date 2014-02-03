@@ -704,7 +704,8 @@ MtpResponseCode MtpServer::doGetObjectInfo() {
         mData.putUInt32(info.mAssociationDesc);
         mData.putUInt32(info.mSequenceNumber);
         mData.putString(info.mName);
-        mData.putEmptyString();    // date created
+        formatDateTime(info.mDateCreated, date, sizeof(date));
+        mData.putString(date);   // date created
         formatDateTime(info.mDateModified, date, sizeof(date));
         mData.putString(date);   // date modified
         mData.putEmptyString();   // keywords
@@ -931,7 +932,7 @@ MtpResponseCode MtpServer::doSendObject() {
     initialData = ret - MTP_CONTAINER_HEADER_SIZE;
 
     mtp_file_range  mfr;
-    mfr.fd = open(mSendObjectFilePath, O_RDWR | O_CREAT | O_TRUNC);
+    mfr.fd = open(mSendObjectFilePath, O_RDWR | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
     if (mfr.fd < 0) {
         result = MTP_RESPONSE_GENERAL_ERROR;
         goto done;
@@ -1118,7 +1119,7 @@ MtpResponseCode MtpServer::doSendPartialObject() {
     int initialData = ret - MTP_CONTAINER_HEADER_SIZE;
 
     if (initialData > 0) {
-        ret = write(edit->mFD, mData.getData(), initialData);
+        ret = pwrite(edit->mFD, mData.getData(), initialData, offset);
         offset += initialData;
         length -= initialData;
     }

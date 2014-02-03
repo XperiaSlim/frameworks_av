@@ -23,40 +23,42 @@
 
 namespace android {
 
-struct ATSParser;
 struct LiveSession;
 
 struct NuPlayer::HTTPLiveSource : public NuPlayer::Source {
     HTTPLiveSource(
+            const sp<AMessage> &notify,
             const char *url,
             const KeyedVector<String8, String8> *headers,
             bool uidValid = false,
             uid_t uid = 0);
 
+    virtual void prepareAsync();
     virtual void start();
 
-    virtual status_t feedMoreTSData();
-
-    virtual sp<MetaData> getFormat(bool audio);
     virtual status_t dequeueAccessUnit(bool audio, sp<ABuffer> *accessUnit);
+    virtual sp<AMessage> getFormat(bool audio);
 
+    virtual status_t feedMoreTSData();
     virtual status_t getDuration(int64_t *durationUs);
+    virtual status_t getTrackInfo(Parcel *reply) const;
+    virtual status_t selectTrack(size_t trackIndex, bool select);
     virtual status_t seekTo(int64_t seekTimeUs);
-    virtual bool isSeekable();
-
-#ifdef QCOM_HARDWARE
-    virtual status_t getNewSeekTime(int64_t *newSeek);
-
-    virtual void notifyRenderingPosition(int64_t nRenderingTS);
-#endif
 
 protected:
     virtual ~HTTPLiveSource();
+
+    virtual void onMessageReceived(const sp<AMessage> &msg);
 
 private:
     enum Flags {
         // Don't log any URLs.
         kFlagIncognito = 1,
+    };
+
+    enum {
+        kWhatSessionNotify,
+        kWhatFetchSubtitleData,
     };
 
     AString mURL;
@@ -68,12 +70,9 @@ private:
     off64_t mOffset;
     sp<ALooper> mLiveLooper;
     sp<LiveSession> mLiveSession;
-    sp<ATSParser> mTSParser;
+    int32_t mFetchSubtitleDataGeneration;
 
-#ifdef QCOM_HARDWARE
-    int64_t mNewSeekTime;
-    int64_t mCurrentPlayingTime;
-#endif
+    void onSessionNotify(const sp<AMessage> &msg);
 
     DISALLOW_EVIL_CONSTRUCTORS(HTTPLiveSource);
 };

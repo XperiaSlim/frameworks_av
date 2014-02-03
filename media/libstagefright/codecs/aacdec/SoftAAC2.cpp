@@ -15,6 +15,7 @@
  */
 
 #define LOG_TAG "SoftAAC2"
+//#define LOG_NDEBUG 0
 #include <utils/Log.h>
 
 #include "SoftAAC2.h"
@@ -25,6 +26,15 @@
 #include <media/stagefright/MediaErrors.h>
 
 #define FILEREAD_MAX_LAYERS 2
+
+#define DRC_DEFAULT_MOBILE_REF_LEVEL 64  /* 64*-0.25dB = -16 dB below full scale for mobile conf */
+#define DRC_DEFAULT_MOBILE_DRC_CUT   127 /* maximum compression of dynamic range for mobile conf */
+#define DRC_DEFAULT_MOBILE_DRC_BOOST 127 /* maximum compression of dynamic range for mobile conf */
+#define MAX_CHANNEL_COUNT            6  /* maximum number of audio channels that can be decoded */
+// names of properties that can be used to override the default DRC settings
+#define PROP_DRC_OVERRIDE_REF_LEVEL  "aac_drc_reference_level"
+#define PROP_DRC_OVERRIDE_CUT        "aac_drc_cut"
+#define PROP_DRC_OVERRIDE_BOOST      "aac_drc_boost"
 
 namespace android {
 
@@ -85,7 +95,7 @@ void SoftAAC2::initPorts() {
     def.eDir = OMX_DirOutput;
     def.nBufferCountMin = kNumOutputBuffers;
     def.nBufferCountActual = def.nBufferCountMin;
-    def.nBufferSize = 8192 * 2;
+    def.nBufferSize = 4096 * MAX_CHANNEL_COUNT;
     def.bEnabled = OMX_TRUE;
     def.bPopulated = OMX_FALSE;
     def.eDomain = OMX_PortDomainAudio;
@@ -109,7 +119,38 @@ status_t SoftAAC2::initDecoder() {
             status = OK;
         }
     }
-    mIsFirst = true;
+    mDecoderHasData = false;
+
+    // for streams that contain metadata, use the mobile profile DRC settings unless overridden
+    // by platform properties:
+    char value[PROPERTY_VALUE_MAX];
+    //  * AAC_DRC_REFERENCE_LEVEL
+    if (property_get(PROP_DRC_OVERRIDE_REF_LEVEL, value, NULL)) {
+        unsigned refLevel = atoi(value);
+        ALOGV("AAC decoder using AAC_DRC_REFERENCE_LEVEL of %d instead of %d",
+                refLevel, DRC_DEFAULT_MOBILE_REF_LEVEL);
+        aacDecoder_SetParam(mAACDecoder, AAC_DRC_REFERENCE_LEVEL, refLevel);
+    } else {
+        aacDecoder_SetParam(mAACDecoder, AAC_DRC_REFERENCE_LEVEL, DRC_DEFAULT_MOBILE_REF_LEVEL);
+    }
+    //  * AAC_DRC_ATTENUATION_FACTOR
+    if (property_get(PROP_DRC_OVERRIDE_CUT, value, NULL)) {
+        unsigned cut = atoi(value);
+        ALOGV("AAC decoder using AAC_DRC_ATTENUATION_FACTOR of %d instead of %d",
+                        cut, DRC_DEFAULT_MOBILE_DRC_CUT);
+        aacDecoder_SetParam(mAACDecoder, AAC_DRC_ATTENUATION_FACTOR, cut);
+    } else {
+        aacDecoder_SetParam(mAACDecoder, AAC_DRC_ATTENUATION_FACTOR, DRC_DEFAULT_MOBILE_DRC_CUT);
+    }
+    //  * AAC_DRC_BOOST_FACTOR (note: no default, using cut)
+    if (property_get(PROP_DRC_OVERRIDE_BOOST, value, NULL)) {
+        unsigned boost = atoi(value);
+        ALOGV("AAC decoder using AAC_DRC_BOOST_FACTOR of %d", boost);
+        aacDecoder_SetParam(mAACDecoder, AAC_DRC_BOOST_FACTOR, boost);
+    } else {
+        aacDecoder_SetParam(mAACDecoder, AAC_DRC_BOOST_FACTOR, DRC_DEFAULT_MOBILE_DRC_BOOST);
+    }
+
     return status;
 }
 
@@ -289,6 +330,7 @@ void SoftAAC2::onQueueFilled(OMX_U32 portIndex) {
             notify(OMX_EventError, OMX_ErrorUndefined, decoderErr, NULL);
             return;
         }
+
         inQueue.erase(inQueue.begin());
         info->mOwnedByUs = false;
         notifyEmptyBufferDone(header);
@@ -320,22 +362,42 @@ void SoftAAC2::onQueueFilled(OMX_U32 portIndex) {
             inInfo->mOwnedByUs = false;
             notifyEmptyBufferDone(inHeader);
 
-            // flush out the decoder's delayed data by calling DecodeFrame one more time, with
-            // the AACDEC_FLUSH flag set
-            INT_PCM *outBuffer =
-                    reinterpret_cast<INT_PCM *>(outHeader->pBuffer + outHeader->nOffset);
-            AAC_DECODER_ERROR decoderErr = aacDecoder_DecodeFrame(mAACDecoder,
-                                                                  outBuffer,
-                                                                  outHeader->nAllocLen,
-                                                                  AACDEC_FLUSH);
-            if (decoderErr != AAC_DEC_OK) {
-                mSignalledError = true;
-                notify(OMX_EventError, OMX_ErrorUndefined, decoderErr, NULL);
-                return;
+            if (mDecoderHasData || mInputBufferCount) {
+                // flush out the decoder's delayed data by calling DecodeFrame
+                // one more time, with the AACDEC_FLUSH flag set
+
+                // for the use case where the first frame in the buffer is EOS,
+                // decode the header to update the sample rate and channel mode
+                // and flush out the buffer.
+                INT_PCM *outBuffer =
+                        reinterpret_cast<INT_PCM *>(
+                                outHeader->pBuffer + outHeader->nOffset);
+
+                AAC_DECODER_ERROR decoderErr =
+                    aacDecoder_DecodeFrame(mAACDecoder,
+                                           outBuffer,
+                                           outHeader->nAllocLen,
+                                           AACDEC_FLUSH);
+                mDecoderHasData = false;
+
+                if (decoderErr != AAC_DEC_OK) {
+                    mSignalledError = true;
+
+                    notify(OMX_EventError, OMX_ErrorUndefined, decoderErr,
+                           NULL);
+
+                    return;
+                }
+
+                outHeader->nFilledLen =
+                        mStreamInfo->frameSize
+                            * sizeof(int16_t)
+                            * mStreamInfo->numChannels;
+            } else {
+                // we never submitted any data to the decoder, so there's nothing to flush out
+                outHeader->nFilledLen = 0;
             }
 
-            outHeader->nFilledLen =
-                    mStreamInfo->frameSize * sizeof(int16_t) * mStreamInfo->numChannels;
             outHeader->nFlags = OMX_BUFFERFLAG_EOS;
             outHeader->nTimeStamp =
                 mAnchorTimeUs
@@ -407,7 +469,9 @@ void SoftAAC2::onQueueFilled(OMX_U32 portIndex) {
         }
 
         // Fill and decode
-        INT_PCM *outBuffer = reinterpret_cast<INT_PCM *>(outHeader->pBuffer + outHeader->nOffset);
+        INT_PCM *outBuffer = reinterpret_cast<INT_PCM *>(
+                outHeader->pBuffer + outHeader->nOffset);
+
         bytesValid[0] = inBufferLength[0];
 
         int prevSampleRate = mStreamInfo->sampleRate;
@@ -419,6 +483,7 @@ void SoftAAC2::onQueueFilled(OMX_U32 portIndex) {
                             inBuffer,
                             inBufferLength,
                             bytesValid);
+            mDecoderHasData = true;
 
             decoderErr = aacDecoder_DecodeFrame(mAACDecoder,
                                                 outBuffer,
@@ -428,45 +493,6 @@ void SoftAAC2::onQueueFilled(OMX_U32 portIndex) {
             if (decoderErr == AAC_DEC_NOT_ENOUGH_BITS) {
                 ALOGW("Not enough bits, bytesValid %d", bytesValid[0]);
             }
-        }
-
-        /*
-         * AAC+/eAAC+ streams can be signalled in two ways: either explicitly
-         * or implicitly, according to MPEG4 spec. AAC+/eAAC+ is a dual
-         * rate system and the sampling rate in the final output is actually
-         * doubled compared with the core AAC decoder sampling rate.
-         *
-         * Explicit signalling is done by explicitly defining SBR audio object
-         * type in the bitstream. Implicit signalling is done by embedding
-         * SBR content in AAC extension payload specific to SBR, and hence
-         * requires an AAC decoder to perform pre-checks on actual audio frames.
-         *
-         * Thus, we could not say for sure whether a stream is
-         * AAC+/eAAC+ until the first data frame is decoded.
-         */
-        if (mInputBufferCount <= 2) {
-            if (mStreamInfo->sampleRate != prevSampleRate ||
-                mStreamInfo->numChannels != prevNumChannels) {
-                maybeConfigureDownmix();
-                ALOGI("Reconfiguring decoder: %d Hz, %d channels",
-                      mStreamInfo->sampleRate,
-                      mStreamInfo->numChannels);
-
-                // We're going to want to revisit this input buffer, but
-                // may have already advanced the offset. Undo that if
-                // necessary.
-                inHeader->nOffset -= adtsHeaderSize;
-                inHeader->nFilledLen += adtsHeaderSize;
-
-                notify(OMX_EventPortSettingsChanged, 1, 0, NULL);
-                mOutputPortSettingsChange = AWAITING_DISABLED;
-                return;
-            }
-        } else if (!mStreamInfo->sampleRate || !mStreamInfo->numChannels) {
-            ALOGW("Invalid AAC stream");
-            mSignalledError = true;
-            notify(OMX_EventError, OMX_ErrorUndefined, decoderErr, NULL);
-            return;
         }
 
         size_t numOutBytes =
@@ -490,16 +516,51 @@ void SoftAAC2::onQueueFilled(OMX_U32 portIndex) {
             // fall through
         }
 
+        if (inHeader->nFilledLen == 0) {
+            inInfo->mOwnedByUs = false;
+            inQueue.erase(inQueue.begin());
+            inInfo = NULL;
+            notifyEmptyBufferDone(inHeader);
+            inHeader = NULL;
+        }
+
+        /*
+         * AAC+/eAAC+ streams can be signalled in two ways: either explicitly
+         * or implicitly, according to MPEG4 spec. AAC+/eAAC+ is a dual
+         * rate system and the sampling rate in the final output is actually
+         * doubled compared with the core AAC decoder sampling rate.
+         *
+         * Explicit signalling is done by explicitly defining SBR audio object
+         * type in the bitstream. Implicit signalling is done by embedding
+         * SBR content in AAC extension payload specific to SBR, and hence
+         * requires an AAC decoder to perform pre-checks on actual audio frames.
+         *
+         * Thus, we could not say for sure whether a stream is
+         * AAC+/eAAC+ until the first data frame is decoded.
+         */
+        if (mInputBufferCount <= 2) {
+            if (mStreamInfo->sampleRate != prevSampleRate ||
+                mStreamInfo->numChannels != prevNumChannels) {
+                maybeConfigureDownmix();
+                ALOGI("Reconfiguring decoder: %d->%d Hz, %d->%d channels",
+                      prevSampleRate, mStreamInfo->sampleRate,
+                      prevNumChannels, mStreamInfo->numChannels);
+
+                notify(OMX_EventPortSettingsChanged, 1, 0, NULL);
+                mOutputPortSettingsChange = AWAITING_DISABLED;
+                return;
+            }
+        } else if (!mStreamInfo->sampleRate || !mStreamInfo->numChannels) {
+            ALOGW("Invalid AAC stream");
+            mSignalledError = true;
+            notify(OMX_EventError, OMX_ErrorUndefined, decoderErr, NULL);
+            return;
+        }
+
         if (decoderErr == AAC_DEC_OK || mNumSamplesOutput > 0) {
             // We'll only output data if we successfully decoded it or
             // we've previously decoded valid data, in the latter case
             // (decode failed) we'll output a silent frame.
-            if (mIsFirst) {
-                mIsFirst = false;
-                // the first decoded frame should be discarded to account for decoder delay
-                numOutBytes = 0;
-            }
-
             outHeader->nFilledLen = numOutBytes;
             outHeader->nFlags = 0;
 
@@ -516,14 +577,6 @@ void SoftAAC2::onQueueFilled(OMX_U32 portIndex) {
             outHeader = NULL;
         }
 
-        if (inHeader->nFilledLen == 0) {
-            inInfo->mOwnedByUs = false;
-            inQueue.erase(inQueue.begin());
-            inInfo = NULL;
-            notifyEmptyBufferDone(inHeader);
-            inHeader = NULL;
-        }
-
         if (decoderErr == AAC_DEC_OK) {
             ++mInputBufferCount;
         }
@@ -534,9 +587,33 @@ void SoftAAC2::onPortFlushCompleted(OMX_U32 portIndex) {
     if (portIndex == 0) {
         // Make sure that the next buffer output does not still
         // depend on fragments from the last one decoded.
-        aacDecoder_SetParam(mAACDecoder, AAC_TPDEC_CLEAR_BUFFER, 1);
-        mIsFirst = true;
+        // drain all existing data
+        drainDecoder();
     }
+}
+
+void SoftAAC2::drainDecoder() {
+    // a buffer big enough for 6 channels of decoded HE-AAC
+    short buf [2048*6];
+    aacDecoder_DecodeFrame(mAACDecoder,
+            buf, sizeof(buf), AACDEC_FLUSH | AACDEC_CLRHIST | AACDEC_INTR);
+    aacDecoder_DecodeFrame(mAACDecoder,
+            buf, sizeof(buf), AACDEC_FLUSH | AACDEC_CLRHIST | AACDEC_INTR);
+    aacDecoder_SetParam(mAACDecoder, AAC_TPDEC_CLEAR_BUFFER, 1);
+    mDecoderHasData = false;
+}
+
+void SoftAAC2::onReset() {
+    drainDecoder();
+    // reset the "configured" state
+    mInputBufferCount = 0;
+    mNumSamplesOutput = 0;
+    // To make the codec behave the same before and after a reset, we need to invalidate the
+    // streaminfo struct. This does that:
+    mStreamInfo->sampleRate = 0;
+
+    mSignalledError = false;
+    mOutputPortSettingsChange = NONE;
 }
 
 void SoftAAC2::onPortEnableCompleted(OMX_U32 portIndex, bool enabled) {

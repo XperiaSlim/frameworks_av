@@ -21,7 +21,7 @@
 #include "include/HTTPBase.h"
 
 #if CHROMIUM_AVAILABLE
-#include "include/ChromiumHTTPDataSource.h"
+#include "include/chromium_http_stub.h"
 #endif
 
 #include <media/stagefright/foundation/ADebug.h>
@@ -29,6 +29,8 @@
 
 #include <cutils/properties.h>
 #include <cutils/qtaguid.h>
+
+#include <ConnectivityManager.h>
 
 namespace android {
 
@@ -46,13 +48,26 @@ HTTPBase::HTTPBase()
 // static
 sp<HTTPBase> HTTPBase::Create(uint32_t flags) {
 #if CHROMIUM_AVAILABLE
-        return new ChromiumHTTPDataSource(flags);
+        HTTPBase *dataSource = createChromiumHTTPDataSource(flags);
+        if (dataSource) {
+           return dataSource;
+        }
 #endif
     {
         TRESPASS();
 
         return NULL;
     }
+}
+
+// static
+status_t HTTPBase::UpdateProxyConfig(
+        const char *host, int32_t port, const char *exclusionList) {
+#if CHROMIUM_AVAILABLE
+    return UpdateChromiumHTTPDataSourceProxyConfig(host, port, exclusionList);
+#else
+    return INVALID_OPERATION;
+#endif
 }
 
 void HTTPBase::addBandwidthMeasurement(
@@ -149,6 +164,16 @@ void HTTPBase::UnRegisterSocketUserTag(int sockfd) {
     if (res != 0) {
         ALOGE("Failed untagging socket %d (My UID=%d)", sockfd, geteuid());
     }
+}
+
+// static
+void HTTPBase::RegisterSocketUserMark(int sockfd, uid_t uid) {
+    ConnectivityManager::markSocketAsUser(sockfd, uid);
+}
+
+// static
+void HTTPBase::UnRegisterSocketUserMark(int sockfd) {
+    RegisterSocketUserMark(sockfd, geteuid());
 }
 
 }  // namespace android

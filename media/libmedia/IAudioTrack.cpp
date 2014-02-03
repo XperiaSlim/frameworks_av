@@ -33,12 +33,15 @@ enum {
     START,
     STOP,
     FLUSH,
-    MUTE,
+    RESERVED, // was MUTE
     PAUSE,
     ATTACH_AUX_EFFECT,
     ALLOCATE_TIMED_BUFFER,
     QUEUE_TIMED_BUFFER,
     SET_MEDIA_TIME_TRANSFORM,
+    SET_PARAMETERS,
+    GET_TIMESTAMP,
+    SIGNAL,
 };
 
 class BpAudioTrack : public BpInterface<IAudioTrack>
@@ -86,14 +89,6 @@ public:
         Parcel data, reply;
         data.writeInterfaceToken(IAudioTrack::getInterfaceDescriptor());
         remote()->transact(FLUSH, data, &reply);
-    }
-
-    virtual void mute(bool e)
-    {
-        Parcel data, reply;
-        data.writeInterfaceToken(IAudioTrack::getInterfaceDescriptor());
-        data.writeInt32(e);
-        remote()->transact(MUTE, data, &reply);
     }
 
     virtual void pause()
@@ -162,6 +157,38 @@ public:
         }
         return status;
     }
+
+    virtual status_t setParameters(const String8& keyValuePairs) {
+        Parcel data, reply;
+        data.writeInterfaceToken(IAudioTrack::getInterfaceDescriptor());
+        data.writeString8(keyValuePairs);
+        status_t status = remote()->transact(SET_PARAMETERS, data, &reply);
+        if (status == NO_ERROR) {
+            status = reply.readInt32();
+        }
+        return status;
+    }
+
+    virtual status_t getTimestamp(AudioTimestamp& timestamp) {
+        Parcel data, reply;
+        data.writeInterfaceToken(IAudioTrack::getInterfaceDescriptor());
+        status_t status = remote()->transact(GET_TIMESTAMP, data, &reply);
+        if (status == NO_ERROR) {
+            status = reply.readInt32();
+            if (status == NO_ERROR) {
+                timestamp.mPosition = reply.readInt32();
+                timestamp.mTime.tv_sec = reply.readInt32();
+                timestamp.mTime.tv_nsec = reply.readInt32();
+            }
+        }
+        return status;
+    }
+
+    virtual void signal() {
+        Parcel data, reply;
+        data.writeInterfaceToken(IAudioTrack::getInterfaceDescriptor());
+        remote()->transact(SIGNAL, data, &reply);
+    }
 };
 
 IMPLEMENT_META_INTERFACE(AudioTrack, "android.media.IAudioTrack");
@@ -190,11 +217,6 @@ status_t BnAudioTrack::onTransact(
         case FLUSH: {
             CHECK_INTERFACE(IAudioTrack, data, reply);
             flush();
-            return NO_ERROR;
-        } break;
-        case MUTE: {
-            CHECK_INTERFACE(IAudioTrack, data, reply);
-            mute( data.readInt32() );
             return NO_ERROR;
         } break;
         case PAUSE: {
@@ -234,6 +256,29 @@ status_t BnAudioTrack::onTransact(
             xform.a_to_b_denom = data.readInt32();
             int target = data.readInt32();
             reply->writeInt32(setMediaTimeTransform(xform, target));
+            return NO_ERROR;
+        } break;
+        case SET_PARAMETERS: {
+            CHECK_INTERFACE(IAudioTrack, data, reply);
+            String8 keyValuePairs(data.readString8());
+            reply->writeInt32(setParameters(keyValuePairs));
+            return NO_ERROR;
+        } break;
+        case GET_TIMESTAMP: {
+            CHECK_INTERFACE(IAudioTrack, data, reply);
+            AudioTimestamp timestamp;
+            status_t status = getTimestamp(timestamp);
+            reply->writeInt32(status);
+            if (status == NO_ERROR) {
+                reply->writeInt32(timestamp.mPosition);
+                reply->writeInt32(timestamp.mTime.tv_sec);
+                reply->writeInt32(timestamp.mTime.tv_nsec);
+            }
+            return NO_ERROR;
+        } break;
+        case SIGNAL: {
+            CHECK_INTERFACE(IAudioTrack, data, reply);
+            signal();
             return NO_ERROR;
         } break;
         default:

@@ -20,14 +20,13 @@
 #include <GLES2/gl2.h>
 #include <GLES2/gl2ext.h>
 #include <cutils/log.h>
-#include <gui/SurfaceTexture.h>
-#include <gui/SurfaceTextureClient.h>
-#include <media/stagefright/foundation/ADebug.h>
+#include <gui/GLConsumer.h>
+#include <gui/Surface.h>
 #include <media/stagefright/MediaBuffer.h>
 #include <media/stagefright/MetaData.h>
+#include <media/stagefright/foundation/ADebug.h>
 #include "VideoEditorTools.h"
 
-//#define PREVIEW_DEBUG 1
 #define CHECK_EGL_ERROR CHECK(EGL_SUCCESS == eglGetError())
 #define CHECK_GL_ERROR CHECK(GLenum(GL_NO_ERROR) == glGetError())
 
@@ -103,11 +102,7 @@ static const char fSrcNegative[] =
     "void main() {\n"
     "  vec4 rgb = texture2D(texSampler, texCoords);\n"
     "  vec4 yuv = rgb2yuv * rgb;\n"
-#ifdef QCOM_HARDWARE
-    "  yuv = vec4(255.0 - yuv.x, yuv.y, yuv.z, yuv.w);\n"
-#else
     "  yuv = vec4(255.0 - yuv.x, yuv.y, yuv.z, 1.0);\n"
-#endif
     "  gl_FragColor = yuv2rgb * yuv;\n"
     "}\n";
 
@@ -320,8 +315,8 @@ NativeWindowRenderer::~NativeWindowRenderer() {
 }
 
 void NativeWindowRenderer::render(RenderInput* input) {
-    sp<SurfaceTexture> ST = input->mST;
-    sp<SurfaceTextureClient> STC = input->mSTC;
+    sp<GLConsumer> ST = input->mST;
+    sp<Surface> STC = input->mSTC;
 
     if (input->mIsExternalBuffer) {
         queueExternalBuffer(STC.get(), input->mBuffer,
@@ -387,7 +382,7 @@ void NativeWindowRenderer::queueInternalBuffer(ANativeWindow *anw,
     int64_t timeUs;
     CHECK(buffer->meta_data()->findInt64(kKeyTime, &timeUs));
     native_window_set_buffers_timestamp(anw, timeUs * 1000);
-    status_t err = anw->queueBuffer(anw, buffer->graphicBuffer().get());
+    status_t err = anw->queueBuffer(anw, buffer->graphicBuffer().get(), -1);
     if (err != 0) {
         ALOGE("queueBuffer failed with error %s (%d)", strerror(-err), -err);
         return;
@@ -403,34 +398,17 @@ void NativeWindowRenderer::queueExternalBuffer(ANativeWindow* anw,
             HAL_PIXEL_FORMAT_YV12);
     native_window_set_usage(anw, GRALLOC_USAGE_SW_WRITE_OFTEN);
 
-#ifdef QCOM_HARDWARE
-    native_window_set_buffer_count(anw, 3);
-#endif
-
     ANativeWindowBuffer* anb;
-    anw->dequeueBuffer(anw, &anb);
+    CHECK(NO_ERROR == native_window_dequeue_buffer_and_wait(anw, &anb));
     CHECK(anb != NULL);
-
-    sp<GraphicBuffer> buf(new GraphicBuffer(anb, false));
-    CHECK(NO_ERROR == anw->lockBuffer(anw, buf->getNativeBuffer()));
 
     // Copy the buffer
     uint8_t* img = NULL;
+    sp<GraphicBuffer> buf(new GraphicBuffer(anb, false));
     buf->lock(GRALLOC_USAGE_SW_WRITE_OFTEN, (void**)(&img));
     copyI420Buffer(buffer, img, width, height, buf->getStride());
-
-#if PREVIEW_DEBUG
-    FILE *fp1 = fopen("/sdcard/pre_test_yuv.raw", "ab");
-    if(fp1 == NULL)
-        LOGE("Errors file can not be created");
-    else {
-        fwrite(img, buf->getWidth() * buf->getHeight()* 3/2, 1, fp1);
-        fclose(fp1);
-    }
-#endif
-
     buf->unlock();
-    CHECK(NO_ERROR == anw->queueBuffer(anw, buf->getNativeBuffer()));
+    CHECK(NO_ERROR == anw->queueBuffer(anw, buf->getNativeBuffer(), -1));
 }
 
 void NativeWindowRenderer::copyI420Buffer(MediaBuffer* src, uint8_t* dst,
@@ -590,8 +568,9 @@ void NativeWindowRenderer::destroyRenderInput(RenderInput* input) {
 RenderInput::RenderInput(NativeWindowRenderer* renderer, GLuint textureId)
     : mRenderer(renderer)
     , mTextureId(textureId) {
-    mST = new SurfaceTexture(mTextureId);
-    mSTC = new SurfaceTextureClient(mST);
+    sp<BufferQueue> bq = new BufferQueue();
+    mST = new GLConsumer(bq, mTextureId);
+    mSTC = new Surface(bq);
     native_window_connect(mSTC.get(), NATIVE_WINDOW_API_MEDIA);
 }
 

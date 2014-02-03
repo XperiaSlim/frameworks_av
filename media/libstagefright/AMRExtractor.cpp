@@ -259,7 +259,7 @@ status_t AMRSource::read(
         mCurrentTimeUs = seekFrame * 20000ll;
 
         int index = seekFrame / 50;
-        if (index >= (int)mOffsetTableLength) {
+        if (index >= mOffsetTableLength) {
             index = mOffsetTableLength - 1;
         }
 

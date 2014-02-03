@@ -96,21 +96,20 @@ static int32_t getColorFormat(const char* colorFormat) {
     }
 
     if (!strcmp(colorFormat, CameraParameters::PIXEL_FORMAT_YUV420SP)) {
-#ifdef EXYNOS4_ENHANCEMENTS
-#ifdef BOARD_USE_SAMSUNG_V4L2_ION
-        static const int OMX_SEC_COLOR_FormatNV12LVirtualAddress = 0x7F000003;
-        return OMX_SEC_COLOR_FormatNV12VirtualAddress;
-#else
+#ifdef USE_SAMSUNG_COLORFORMAT
         static const int OMX_SEC_COLOR_FormatNV12LPhysicalAddress = 0x7F000002;
         return OMX_SEC_COLOR_FormatNV12LPhysicalAddress;
-#endif
 #else
         return OMX_COLOR_FormatYUV420SemiPlanar;
 #endif
     }
 
     if (!strcmp(colorFormat, CameraParameters::PIXEL_FORMAT_YUV422I)) {
+#if defined(TARGET_OMAP3) && defined(OMAP_ENHANCEMENT)
+        return OMX_COLOR_FormatCbYCrY;
+#else
         return OMX_COLOR_FormatYCbYCr;
+#endif
     }
 
     if (!strcmp(colorFormat, CameraParameters::PIXEL_FORMAT_RGB565)) {
@@ -121,19 +120,24 @@ static int32_t getColorFormat(const char* colorFormat) {
        return OMX_TI_COLOR_FormatYUV420PackedSemiPlanar;
     }
 
+    if (!strcmp(colorFormat, CameraParameters::PIXEL_FORMAT_ANDROID_OPAQUE)) {
+        return OMX_COLOR_FormatAndroidOpaque;
+    }
+
     ALOGE("Uknown color format (%s), please add it to "
          "CameraSource::getColorFormat", colorFormat);
 
     CHECK(!"Unknown color format");
 }
 
-CameraSource *CameraSource::Create() {
+CameraSource *CameraSource::Create(const String16 &clientName) {
     Size size;
     size.width = -1;
     size.height = -1;
 
     sp<ICamera> camera;
-    return new CameraSource(camera, NULL, 0, size, -1, NULL, false);
+    return new CameraSource(camera, NULL, 0, clientName, -1,
+            size, -1, NULL, false);
 }
 
 // static
@@ -141,14 +145,16 @@ CameraSource *CameraSource::CreateFromCamera(
     const sp<ICamera>& camera,
     const sp<ICameraRecordingProxy>& proxy,
     int32_t cameraId,
+    const String16& clientName,
+    uid_t clientUid,
     Size videoSize,
     int32_t frameRate,
-    const sp<Surface>& surface,
+    const sp<IGraphicBufferProducer>& surface,
     bool storeMetaDataInVideoBuffers) {
 
     CameraSource *source = new CameraSource(camera, proxy, cameraId,
-                    videoSize, frameRate, surface,
-                    storeMetaDataInVideoBuffers);
+            clientName, clientUid, videoSize, frameRate, surface,
+            storeMetaDataInVideoBuffers);
     return source;
 }
 
@@ -156,11 +162,14 @@ CameraSource::CameraSource(
     const sp<ICamera>& camera,
     const sp<ICameraRecordingProxy>& proxy,
     int32_t cameraId,
+    const String16& clientName,
+    uid_t clientUid,
     Size videoSize,
     int32_t frameRate,
-    const sp<Surface>& surface,
+    const sp<IGraphicBufferProducer>& surface,
     bool storeMetaDataInVideoBuffers)
     : mCameraFlags(0),
+      mNumInputBuffers(0),
       mVideoFrameRate(-1),
       mCamera(0),
       mSurface(surface),
@@ -178,6 +187,7 @@ CameraSource::CameraSource(
     mVideoSize.height = -1;
 
     mInitCheck = init(camera, proxy, cameraId,
+                    clientName, clientUid,
                     videoSize, frameRate,
                     storeMetaDataInVideoBuffers);
     if (mInitCheck != OK) releaseCamera();
@@ -189,10 +199,10 @@ status_t CameraSource::initCheck() const {
 
 status_t CameraSource::isCameraAvailable(
     const sp<ICamera>& camera, const sp<ICameraRecordingProxy>& proxy,
-    int32_t cameraId) {
+    int32_t cameraId, const String16& clientName, uid_t clientUid) {
 
     if (camera == 0) {
-        mCamera = Camera::connect(cameraId);
+        mCamera = Camera::connect(cameraId, clientName, clientUid);
         if (mCamera == 0) return -EBUSY;
         mCameraFlags &= ~FLAGS_HOT_CAMERA;
     } else {
@@ -339,11 +349,13 @@ status_t CameraSource::configureCamera(
         ALOGV("Supported frame rates: %s", supportedFrameRates);
         char buf[4];
         snprintf(buf, 4, "%d", frameRate);
+#ifndef HTC_3D_SUPPORT  // HTC uses invalid frame rates intentionally on the 3D camera
         if (strstr(supportedFrameRates, buf) == NULL) {
             ALOGE("Requested frame rate (%d) is not supported: %s",
                 frameRate, supportedFrameRates);
             return BAD_VALUE;
         }
+#endif
 
         // The frame rate is supported, set the camera to the requested value.
         params->setPreviewFrameRate(frameRate);
@@ -441,11 +453,13 @@ status_t CameraSource::checkFrameRate(
 
     // Check the actual video frame rate against the target/requested
     // video frame rate.
+#ifndef HTC_3D_SUPPORT  // HTC uses invalid frame rates intentionally on the 3D camera
     if (frameRate != -1 && (frameRateActual - frameRate) != 0) {
         ALOGE("Failed to set preview frame rate to %d fps. The actual "
                 "frame rate is %d", frameRate, frameRateActual);
         return UNKNOWN_ERROR;
     }
+#endif
 
     // Good now.
     mVideoFrameRate = frameRateActual;
@@ -474,6 +488,8 @@ status_t CameraSource::init(
         const sp<ICamera>& camera,
         const sp<ICameraRecordingProxy>& proxy,
         int32_t cameraId,
+        const String16& clientName,
+        uid_t clientUid,
         Size videoSize,
         int32_t frameRate,
         bool storeMetaDataInVideoBuffers) {
@@ -481,7 +497,7 @@ status_t CameraSource::init(
     ALOGV("init");
     status_t err = OK;
     int64_t token = IPCThreadState::self()->clearCallingIdentity();
-    err = initWithCameraAccess(camera, proxy, cameraId,
+    err = initWithCameraAccess(camera, proxy, cameraId, clientName, clientUid,
                                videoSize, frameRate,
                                storeMetaDataInVideoBuffers);
     IPCThreadState::self()->restoreCallingIdentity(token);
@@ -492,13 +508,16 @@ status_t CameraSource::initWithCameraAccess(
         const sp<ICamera>& camera,
         const sp<ICameraRecordingProxy>& proxy,
         int32_t cameraId,
+        const String16& clientName,
+        uid_t clientUid,
         Size videoSize,
         int32_t frameRate,
         bool storeMetaDataInVideoBuffers) {
     ALOGV("initWithCameraAccess");
     status_t err = OK;
 
-    if ((err = isCameraAvailable(camera, proxy, cameraId)) != OK) {
+    if ((err = isCameraAvailable(camera, proxy, cameraId,
+            clientName, clientUid)) != OK) {
         ALOGE("Camera connection could not be established.");
         return err;
     }
@@ -530,7 +549,7 @@ status_t CameraSource::initWithCameraAccess(
     if (mSurface != NULL) {
         // This CHECK is good, since we just passed the lock/unlock
         // check earlier by calling mCamera->setParameters().
-        CHECK_EQ((status_t)OK, mCamera->setPreviewDisplay(mSurface));
+        CHECK_EQ((status_t)OK, mCamera->setPreviewTarget(mSurface));
     }
 
     // By default, do not store metadata in video buffers
@@ -577,6 +596,18 @@ void CameraSource::startCameraRecording() {
     // camera and recording is started by the applications. The applications
     // will connect to the camera in ICameraRecordingProxy::startRecording.
     int64_t token = IPCThreadState::self()->clearCallingIdentity();
+    if (mNumInputBuffers > 0) {
+        status_t err = mCamera->sendCommand(
+            CAMERA_CMD_SET_VIDEO_BUFFER_COUNT, mNumInputBuffers, 0);
+
+        // This could happen for CameraHAL1 clients; thus the failure is
+        // not a fatal error
+        if (err != OK) {
+            ALOGW("Failed to set video buffer count to %d due to %d",
+                mNumInputBuffers, err);
+        }
+    }
+
     if (mCameraFlags & FLAGS_HOT_CAMERA) {
         mCamera->unlock();
         mCamera.clear();
@@ -605,9 +636,18 @@ status_t CameraSource::start(MetaData *meta) {
     }
 
     mStartTimeUs = 0;
-    int64_t startTimeUs;
-    if (meta && meta->findInt64(kKeyTime, &startTimeUs)) {
-        mStartTimeUs = startTimeUs;
+    mNumInputBuffers = 0;
+    if (meta) {
+        int64_t startTimeUs;
+        if (meta->findInt64(kKeyTime, &startTimeUs)) {
+            mStartTimeUs = startTimeUs;
+        }
+
+        int32_t nBuffers;
+        if (meta->findInt32(kKeyNumBuffers, &nBuffers)) {
+            CHECK_GT(nBuffers, 0);
+            mNumInputBuffers = nBuffers;
+        }
     }
 
     startCameraRecording();
@@ -786,6 +826,10 @@ status_t CameraSource::read(
 void CameraSource::dataCallbackTimestamp(int64_t timestampUs,
         int32_t msgType, const sp<IMemory> &data) {
     ALOGV("dataCallbackTimestamp: timestamp %lld us", timestampUs);
+    if (!mStarted) {
+       ALOGD("Stop recording issued. Return here.");
+       return;
+    }
     Mutex::Autolock autoLock(mLock);
     if (!mStarted || (mNumFramesReceived == 0 && timestampUs < mStartTimeUs)) {
         ALOGV("Drop frame at %lld/%lld us", timestampUs, mStartTimeUs);

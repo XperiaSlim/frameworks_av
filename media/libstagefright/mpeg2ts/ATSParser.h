@@ -38,6 +38,8 @@ struct ATSParser : public RefBase {
         DISCONTINUITY_TIME              = 1,
         DISCONTINUITY_AUDIO_FORMAT      = 2,
         DISCONTINUITY_VIDEO_FORMAT      = 4,
+        DISCONTINUITY_ABSOLUTE_TIME     = 8,
+        DISCONTINUITY_TIME_OFFSET       = 16,
 
         DISCONTINUITY_SEEK              = DISCONTINUITY_TIME,
 
@@ -46,10 +48,6 @@ struct ATSParser : public RefBase {
             DISCONTINUITY_AUDIO_FORMAT
                 | DISCONTINUITY_VIDEO_FORMAT
                 | DISCONTINUITY_TIME,
-
-        //Seek for HLS & TS is handle from player
-        DISCONTINUITY_TS_PLAYER_SEEK = 8,
-        DISCONTINUITY_HLS_PLAYER_SEEK = 16,
     };
 
     enum Flags {
@@ -58,7 +56,9 @@ struct ATSParser : public RefBase {
         // If this flag is _not_ specified, the first PTS encountered in a
         // program of this stream will be assumed to correspond to media time 0
         // instead.
-        TS_TIMESTAMPS_ARE_ABSOLUTE = 1
+        TS_TIMESTAMPS_ARE_ABSOLUTE = 1,
+        // Video PES packets contain exactly one (aligned) access unit.
+        ALIGNED_VIDEO_DATA         = 2,
     };
 
     ATSParser(uint32_t flags = 0);
@@ -88,6 +88,7 @@ struct ATSParser : public RefBase {
         STREAMTYPE_MPEG2_AUDIO_ADTS     = 0x0f,
         STREAMTYPE_MPEG4_VIDEO          = 0x10,
         STREAMTYPE_H264                 = 0x1b,
+        STREAMTYPE_PCM_AUDIO            = 0x83,
     };
 
 protected:
@@ -104,16 +105,31 @@ private:
     // Keyed by PID
     KeyedVector<unsigned, sp<PSISection> > mPSISections;
 
+    int64_t mAbsoluteTimeAnchorUs;
+
+    bool mTimeOffsetValid;
+    int64_t mTimeOffsetUs;
+
+    size_t mNumTSPacketsParsed;
+
     void parseProgramAssociationTable(ABitReader *br);
     void parseProgramMap(ABitReader *br);
     void parsePES(ABitReader *br);
 
     status_t parsePID(
         ABitReader *br, unsigned PID,
+        unsigned continuity_counter,
         unsigned payload_unit_start_indicator);
 
-    void parseAdaptationField(ABitReader *br);
+    void parseAdaptationField(ABitReader *br, unsigned PID);
     status_t parseTS(ABitReader *br);
+
+    void updatePCR(unsigned PID, uint64_t PCR, size_t byteOffsetFromStart);
+
+    uint64_t mPCR[2];
+    size_t mPCRBytes[2];
+    int64_t mSystemTimeUs[2];
+    size_t mNumPCRs;
 
     DISALLOW_EVIL_CONSTRUCTORS(ATSParser);
 };

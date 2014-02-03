@@ -41,6 +41,8 @@ struct AnotherPacketSource : public MediaSource {
     virtual status_t read(
             MediaBuffer **buffer, const ReadOptions *options = NULL);
 
+    void clear();
+
     bool hasBufferAvailable(status_t *finalResult);
 
     // Returns the difference between the last and the first queued
@@ -57,8 +59,8 @@ struct AnotherPacketSource : public MediaSource {
     void signalEOS(status_t result);
 
     status_t dequeueAccessUnit(sp<ABuffer> *buffer);
-    void updateFormat(const sp<MetaData> &meta);
-    int getQueueSize();
+
+    bool isFinished(int64_t duration) const;
 
 protected:
     virtual ~AnotherPacketSource();
@@ -69,6 +71,7 @@ private:
 
     bool mIsAudio;
     sp<MetaData> mFormat;
+    int64_t mLastQueuedTimeUs;
     List<sp<ABuffer> > mBuffers;
     status_t mEOSResult;
 

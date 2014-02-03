@@ -1,7 +1,6 @@
 /*
 **
 ** Copyright 2010, The Android Open Source Project
-** Copyright (c) 2012, Code Aurora Forum. All rights reserved.
 **
 ** Licensed under the Apache License, Version 2.0 (the "License");
 ** you may not use this file except in compliance with the License.
@@ -24,7 +23,7 @@
 #include <utils/Log.h>
 #include <utils/Vector.h>
 #include <cutils/properties.h>
-#include <expat.h>
+#include <libexpat/expat.h>
 #include <media/MediaProfiles.h>
 #include <media/stagefright/foundation/ADebug.h>
 #include <OMX_Video.h>
@@ -378,7 +377,7 @@ MediaProfiles::getCameraId(const char** atts)
 
 void MediaProfiles::addStartTimeOffset(int cameraId, const char** atts)
 {
-    int offsetTimeMs = 700;
+    int offsetTimeMs = 1000;
     if (atts[2]) {
         CHECK(!strcmp("startOffsetMs", atts[2]));
         offsetTimeMs = atoi(atts[3]);
@@ -521,16 +520,16 @@ void MediaProfiles::checkAndAddRequiredProfilesIfNecessary() {
         // Check high and low from either camcorder profile or timelapse profile
         // but not both. Default, check camcorder profile
         size_t j = 0;
-        size_t n = 2;
+        size_t o = 2;
         if (isTimelapseProfile(quality)) {
             // Check timelapse profile instead.
             j = 2;
-            n = kNumRequiredProfiles;
+            o = kNumRequiredProfiles;
         } else {
             // Must be camcorder profile.
             CHECK(isCamcorderProfile(quality));
         }
-        for (; j < n; ++j) {
+        for (; j < o; ++j) {
             info = &(mRequiredProfileRefs[refIndex].mRefs[j]);
             if ((j % 2 == 0 && product > info->mResolutionProduct) ||  // low
                 (j % 2 != 0 && product < info->mResolutionProduct)) {  // high
@@ -805,9 +804,6 @@ MediaProfiles::createDefaultCamcorderProfiles(MediaProfiles *profiles)
 MediaProfiles::createDefaultAudioEncoders(MediaProfiles *profiles)
 {
     profiles->mAudioEncoders.add(createDefaultAmrNBEncoderCap());
-#ifdef QCOM_HARDWARE
-    profiles->mAudioEncoders.add(createDefaultAacEncoderCap());
-#endif
 }
 
 /*static*/ void
@@ -841,15 +837,6 @@ MediaProfiles::createDefaultAmrNBEncoderCap()
     return new MediaProfiles::AudioEncoderCap(
         AUDIO_ENCODER_AMR_NB, 5525, 12200, 8000, 8000, 1, 1);
 }
-
-#ifdef QCOM_HARDWARE
-/*static*/ MediaProfiles::AudioEncoderCap*
-MediaProfiles::createDefaultAacEncoderCap()
-{
-    return new MediaProfiles::AudioEncoderCap(
-        AUDIO_ENCODER_AAC, 64000, 156000, 8000, 48000, 1, 2);
-}
-#endif
 
 /*static*/ void
 MediaProfiles::createDefaultImageEncodingQualityLevels(MediaProfiles *profiles)

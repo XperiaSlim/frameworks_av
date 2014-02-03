@@ -94,23 +94,6 @@ static const effect_descriptor_t * const gDescriptors[] = {
 
 /*--- Effect Library Interface Implementation ---*/
 
-int EffectQueryNumberEffects(uint32_t *pNumEffects) {
-    *pNumEffects = sizeof(gDescriptors) / sizeof(const effect_descriptor_t *);
-    return 0;
-}
-
-int EffectQueryEffect(uint32_t index, effect_descriptor_t *pDescriptor) {
-    if (pDescriptor == NULL) {
-        return -EINVAL;
-    }
-    if (index >= sizeof(gDescriptors) / sizeof(const effect_descriptor_t *)) {
-        return -EINVAL;
-    }
-    memcpy(pDescriptor, gDescriptors[index],
-            sizeof(effect_descriptor_t));
-    return 0;
-}
-
 int EffectCreate(const effect_uuid_t *uuid,
         int32_t sessionId,
         int32_t ioId,
@@ -194,7 +177,7 @@ int EffectGetDescriptor(const effect_uuid_t *uuid,
 
     for (i = 0; i < length; i++) {
         if (memcmp(uuid, &gDescriptors[i]->uuid, sizeof(effect_uuid_t)) == 0) {
-            memcpy(pDescriptor, gDescriptors[i], sizeof(effect_descriptor_t));
+            *pDescriptor = *gDescriptors[i];
             ALOGV("EffectGetDescriptor - UUID matched Reverb type %d, UUID = %x",
                  i, gDescriptors[i]->uuid.timeLow);
             return 0;
@@ -440,7 +423,7 @@ int Reverb_GetDescriptor(effect_handle_t   self,
         }
     }
 
-    memcpy(pDescriptor, desc, sizeof(effect_descriptor_t));
+    *pDescriptor = *desc;
 
     return 0;
 }   /* end Reverb_getDescriptor */
@@ -546,7 +529,7 @@ int Reverb_setConfig(reverb_module_t *pRvbModule, effect_config_t *pConfig,
         return -EINVAL;
     }
 
-    memcpy(&pRvbModule->config, pConfig, sizeof(effect_config_t));
+    pRvbModule->config = *pConfig;
 
     pReverb->m_nSamplingRate = pRvbModule->config.outputCfg.samplingRate;
 
@@ -644,7 +627,7 @@ int Reverb_setConfig(reverb_module_t *pRvbModule, effect_config_t *pConfig,
 
 void Reverb_getConfig(reverb_module_t *pRvbModule, effect_config_t *pConfig)
 {
-    memcpy(pConfig, &pRvbModule->config, sizeof(effect_config_t));
+    *pConfig = pRvbModule->config;
 }
 
 /*----------------------------------------------------------------------------
@@ -2222,8 +2205,6 @@ audio_effect_library_t AUDIO_EFFECT_LIBRARY_INFO_SYM = {
     .version = EFFECT_LIBRARY_API_VERSION,
     .name = "Test Equalizer Library",
     .implementor = "The Android Open Source Project",
-    .query_num_effects = EffectQueryNumberEffects,
-    .query_effect = EffectQueryEffect,
     .create_effect = EffectCreate,
     .release_effect = EffectRelease,
     .get_descriptor = EffectGetDescriptor,

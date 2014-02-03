@@ -25,6 +25,7 @@
 #include <media/stagefright/DataSource.h>
 #include <media/stagefright/OMXClient.h>
 #include <media/stagefright/TimeSource.h>
+#include <media/stagefright/MetaData.h>
 #include <utils/threads.h>
 #include <drm/DrmManagerClient.h>
 
@@ -36,7 +37,7 @@ struct MediaBuffer;
 struct MediaExtractor;
 struct MediaSource;
 struct NuCachedSource2;
-struct ISurfaceTexture;
+struct IGraphicBufferProducer;
 
 class DrmManagerClinet;
 class DecryptHandle;
@@ -81,7 +82,7 @@ struct AwesomePlayer {
 
     bool isPlaying() const;
 
-    status_t setSurfaceTexture(const sp<ISurfaceTexture> &surfaceTexture);
+    status_t setSurfaceTexture(const sp<IGraphicBufferProducer> &bufferProducer);
     void setAudioSink(const sp<MediaPlayerBase::AudioSink> &audioSink);
     status_t setLooping(bool shouldLoop);
 
@@ -100,7 +101,7 @@ struct AwesomePlayer {
 
     void postAudioEOS(int64_t delayUs = 0ll);
     void postAudioSeekComplete();
-
+    void postAudioTearDown();
     status_t dump(int fd, const Vector<String16> &args) const;
 
 private:
@@ -166,10 +167,14 @@ private:
     sp<MediaSource> mVideoTrack;
     sp<MediaSource> mVideoSource;
     sp<AwesomeRenderer> mVideoRenderer;
+    bool mVideoRenderingStarted;
     bool mVideoRendererIsPreview;
+    int32_t mMediaRenderingStartGeneration;
+    int32_t mStartGeneration;
 
     ssize_t mActiveAudioTrackIndex;
     sp<MediaSource> mAudioTrack;
+    sp<MediaSource> mOmxSource;
     sp<MediaSource> mAudioSource;
     AudioPlayer *mAudioPlayer;
     int64_t mDurationUs;
@@ -199,9 +204,7 @@ private:
 
     bool mWatchForAudioSeekComplete;
     bool mWatchForAudioEOS;
-#ifdef QCOM_HARDWARE
-    static int mTunnelAliveAP;
-#endif
+
     sp<TimedEventQueue::Event> mVideoEvent;
     bool mVideoEventPending;
     sp<TimedEventQueue::Event> mStreamDoneEvent;
@@ -212,7 +215,8 @@ private:
     bool mAudioStatusEventPending;
     sp<TimedEventQueue::Event> mVideoLagEvent;
     bool mVideoLagEventPending;
-
+    sp<TimedEventQueue::Event> mAudioTearDownEvent;
+    bool mAudioTearDownEventPending;
     sp<TimedEventQueue::Event> mAsyncPrepareEvent;
     Condition mPreparedCondition;
     bool mIsAsyncPrepare;
@@ -224,6 +228,8 @@ private:
     void postStreamDoneEvent_l(status_t status);
     void postCheckAudioStatusEvent(int64_t delayUs);
     void postVideoLagEvent_l();
+    void postAudioTearDownEvent(int64_t delayUs);
+
     status_t play_l();
 
     MediaBuffer *mVideoBuffer;
@@ -258,6 +264,7 @@ private:
     void setAudioSource(sp<MediaSource> source);
     status_t initAudioDecoder();
 
+
     void setVideoSource(sp<MediaSource> source);
     status_t initVideoDecoder(uint32_t flags = 0);
 
@@ -274,6 +281,9 @@ private:
     void abortPrepare(status_t err);
     void finishAsyncPrepare_l();
     void onVideoLagUpdate();
+    void onAudioTearDownEvent();
+
+    void beginPrepareAsync_l();
 
     bool getCachedDuration_l(int64_t *durationUs, bool *eos);
 
@@ -286,6 +296,8 @@ private:
     void finishSeekIfNecessary(int64_t videoTimeUs);
     void ensureCacheIsFetching_l();
 
+    void notifyIfMediaStarted_l();
+    void createAudioPlayer_l();
     status_t startAudioPlayer_l(bool sendErrorNotification = true);
 
     void shutdownVideoDecoder_l();
@@ -301,17 +313,6 @@ private:
         ASSIGN
     };
     void modifyFlags(unsigned value, FlagMode mode);
-    void logStatistics();
-    void logFirstFrame();
-    void logSeek();
-    void logPause();
-    void logCatchUp(int64_t ts, int64_t clock, int64_t delta);
-    void logLate(int64_t ts, int64_t clock, int64_t delta);
-    void logOnTime(int64_t ts, int64_t clock, int64_t delta);
-    void logSyncLoss();
-    int64_t getTimeOfDayUs();
-    bool mVeryFirstFrame;
-    bool mStatistics;
 
     struct TrackStat {
         String8 mMIME;
@@ -337,28 +338,12 @@ private:
         int32_t mVideoHeight;
         uint32_t mFlags;
         Vector<TrackStat> mTracks;
-
-        int64_t mConsecutiveFramesDropped;
-        uint32_t mCatchupTimeStart;
-        uint32_t mNumTimesSyncLoss;
-        uint32_t mMaxEarlyDelta;
-        uint32_t mMaxLateDelta;
-        uint32_t mMaxTimeSyncLoss;
-        uint64_t mTotalFrames;
-        int64_t mFirstFrameLatencyStartUs; //first frame latency start
-        int64_t mLastFrame;
-        int64_t mLastFrameUs;
-        double mFPSSumUs;
-        int64_t mStatisticsFrames;
-        bool mVeryFirstFrame;
-        int64_t mTotalTime;
-        int64_t mFirstFrameTime;
-
     } mStats;
 
-#ifdef QCOM_HARDWARE
-    bool mBufferingDone;
-#endif
+    bool    mOffloadAudio;
+    bool    mAudioTearDown;
+    bool    mAudioTearDownWasPlaying;
+    int64_t mAudioTearDownPosition;
 
     status_t setVideoScalingMode(int32_t mode);
     status_t setVideoScalingMode_l(int32_t mode);
@@ -371,15 +356,6 @@ private:
     status_t selectTrack(size_t trackIndex, bool select);
 
     size_t countTracks() const;
-
-#ifdef QCOM_HARDWARE
-    //Flag to check if tunnel mode audio is enabled
-    bool mIsTunnelAudio;
-    //Flag to check if audio is enabled for MPQ
-    bool mIsMPQAudio;
-    //Flag to check if tunnel mode audio is enabled for MPQ
-    bool mIsMPQTunnelAudio;
-#endif
 
     AwesomePlayer(const AwesomePlayer &);
     AwesomePlayer &operator=(const AwesomePlayer &);

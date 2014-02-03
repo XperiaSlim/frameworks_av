@@ -14,10 +14,6 @@
  * limitations under the License.
  */
 
-/*--------------------------------------------------------------------------
-Copyright (c) 2012, Code Aurora Forum. All rights reserved.
---------------------------------------------------------------------------*/
-
 //#define LOG_NDEBUG 0
 #define LOG_TAG "StagefrightMetadataRetriever"
 #include <utils/Log.h>
@@ -32,7 +28,6 @@ Copyright (c) 2012, Code Aurora Forum. All rights reserved.
 #include <media/stagefright/MetaData.h>
 #include <media/stagefright/OMXCodec.h>
 #include <media/stagefright/MediaDefs.h>
-#include <cutils/properties.h>
 
 namespace android {
 
@@ -115,6 +110,31 @@ status_t StagefrightMetadataRetriever::setDataSource(
     return OK;
 }
 
+static bool isYUV420PlanarSupported(
+            OMXClient *client,
+            const sp<MetaData> &trackMeta) {
+
+    const char *mime;
+    CHECK(trackMeta->findCString(kKeyMIMEType, &mime));
+
+    Vector<CodecCapabilities> caps;
+    if (QueryCodecs(client->interface(), mime,
+                    true, /* queryDecoders */
+                    true, /* hwCodecOnly */
+                    &caps) == OK) {
+
+        for (size_t j = 0; j < caps.size(); ++j) {
+            CodecCapabilities cap = caps[j];
+            for (size_t i = 0; i < cap.mColorFormats.size(); ++i) {
+                if (cap.mColorFormats[i] == OMX_COLOR_FormatYUV420Planar) {
+                    return true;
+                }
+            }
+        }
+    }
+    return false;
+}
+
 static VideoFrame *extractVideoFrameWithCodecFlags(
         OMXClient *client,
         const sp<MetaData> &trackMeta,
@@ -122,9 +142,27 @@ static VideoFrame *extractVideoFrameWithCodecFlags(
         uint32_t flags,
         int64_t frameTimeUs,
         int seekMode) {
+
+    sp<MetaData> format = source->getFormat();
+
+    // XXX:
+    // Once all vendors support OMX_COLOR_FormatYUV420Planar, we can
+    // remove this check and always set the decoder output color format
+    // skip this check for software decoders
+#ifndef QCOM_HARDWARE
+    if (isYUV420PlanarSupported(client, trackMeta)) {
+        format->setInt32(kKeyColorFormat, OMX_COLOR_FormatYUV420Planar);
+#else
+    if (!(flags & OMXCodec::kSoftwareCodecsOnly)) {
+        if (isYUV420PlanarSupported(client, trackMeta)) {
+            format->setInt32(kKeyColorFormat, OMX_COLOR_FormatYUV420Planar);
+        }
+#endif
+    }
+
     sp<MediaSource> decoder =
         OMXCodec::Create(
-                client->interface(), source->getFormat(), false, source,
+                client->interface(), format, false, source,
                 NULL, flags | OMXCodec::kClientNeedsFramebuffer);
 
     if (decoder.get() == NULL) {
@@ -215,7 +253,7 @@ static VideoFrame *extractVideoFrameWithCodecFlags(
 
     sp<MetaData> meta = decoder->getFormat();
 
-    int32_t width, height, frame_width_rounded;
+    int32_t width, height;
     CHECK(meta->findInt32(kKeyWidth, &width));
     CHECK(meta->findInt32(kKeyHeight, &height));
 
@@ -238,28 +276,7 @@ static VideoFrame *extractVideoFrameWithCodecFlags(
     frame->mHeight = crop_bottom - crop_top + 1;
     frame->mDisplayWidth = frame->mWidth;
     frame->mDisplayHeight = frame->mHeight;
-#ifndef QCOM_HARDWARE
     frame->mSize = frame->mWidth * frame->mHeight * 2;
-#else
-
-    int32_t srcFormat;
-    CHECK(meta->findInt32(kKeyColorFormat, &srcFormat));
-
-    frame_width_rounded = frame->mWidth;
-    switch (srcFormat) {
-        case OMX_QCOM_COLOR_FormatYVU420SemiPlanar:
-        case OMX_COLOR_FormatYUV420SemiPlanar:
-        case OMX_QCOM_COLOR_FormatYUV420PackedSemiPlanar64x32Tile2m8ka:
-            {
-                frame_width_rounded = ((frame->mWidth + 3)/4)*4;
-                break;
-            }
-        default:
-            break;
-    }
-
-    frame->mSize = frame_width_rounded * frame->mHeight * 2;
-#endif
     frame->mData = new uint8_t[frame->mSize];
     frame->mRotationAngle = rotationAngle;
 
@@ -271,10 +288,8 @@ static VideoFrame *extractVideoFrameWithCodecFlags(
         frame->mDisplayHeight = displayHeight;
     }
 
-#ifndef QCOM_HARDWARE
     int32_t srcFormat;
     CHECK(meta->findInt32(kKeyColorFormat, &srcFormat));
-#endif
 
     ColorConverter converter(
             (OMX_COLOR_FORMATTYPE)srcFormat, OMX_COLOR_Format16bitRGB565);
@@ -285,11 +300,7 @@ static VideoFrame *extractVideoFrameWithCodecFlags(
                 width, height,
                 crop_left, crop_top, crop_right, crop_bottom,
                 frame->mData,
-#ifdef QCOM_HARDWARE
-                frame_width_rounded,
-#else
                 frame->mWidth,
-#endif
                 frame->mHeight,
                 0, 0, frame->mWidth - 1, frame->mHeight - 1);
     } else {
@@ -377,66 +388,23 @@ VideoFrame *StagefrightMetadataRetriever::getFrameAtTime(
         memcpy(mAlbumArt->mData, data, dataSize);
     }
 
-#ifndef QCOM_HARDWARE
     VideoFrame *frame =
         extractVideoFrameWithCodecFlags(
+#ifndef QCOM_HARDWARE
                 &mClient, trackMeta, source, OMXCodec::kPreferSoftwareCodecs,
-                timeUs, option);
 #else
-    const char *mime;
-    bool success = trackMeta->findCString(kKeyMIMEType, &mime);
-    CHECK(success);
-    VideoFrame *frame = NULL;
-
-    /* TBD!
-    if ((!strcmp(mime, MEDIA_MIMETYPE_VIDEO_DIVX))||
-            (!strcmp(mime, MEDIA_MIMETYPE_VIDEO_DIVX311))||
-            (!strcmp(mime, MEDIA_MIMETYPE_VIDEO_DIVX4))||
-            (!strcmp(mime, MEDIA_MIMETYPE_VIDEO_WMV)))
-    {
-        ALOGV("Software codec is not being used for %s clips for thumbnail ",
-            mime);
-    } else {*/
-        char value[PROPERTY_VALUE_MAX];
-        if (property_get("debug.thumbnail.disablesw", value, NULL) &&
-            atoi(value)) {
-            ALOGE("Dont use sw decoder for thumbnail");
-        }
-        else {
-            frame = extractVideoFrameWithCodecFlags(
                 &mClient, trackMeta, source, OMXCodec::kSoftwareCodecsOnly,
-                timeUs, option);
-            if (frame == NULL){
-                // remake source to ensure its stopped before we start it
-                source.clear();
-                source = mExtractor->getTrack(i);
-                if (source.get() == NULL) {
-                    ALOGV("unable to instantiate video track.");
-                    return NULL;
-                }
-            }
-        }
-//    }
 #endif
+                timeUs, option);
+
     if (frame == NULL) {
         ALOGV("Software decoder failed to extract thumbnail, "
              "trying hardware decoder.");
 
-        int32_t flags = 0;
-#ifdef QCOM_HARDWARE
-        char value[PROPERTY_VALUE_MAX];
-        if (property_get("ro.board.platform", value, "0")
-            && (!strncmp(value, "msm8660", sizeof("msm8660") - 1) ||
-                !strncmp(value, "msm8960", sizeof("msm8960") - 1) ||
-                !strncmp(value, "msm7x27a", sizeof("msm7x27a") - 1) ||
-                !strncmp(value, "msm7630", sizeof("msm7630") - 1) )) {
-            flags |= OMXCodec::kEnableThumbnailMode | OMXCodec::kHardwareCodecsOnly;
-        }
-#endif
-        frame = extractVideoFrameWithCodecFlags(&mClient, trackMeta,
-                    source, flags,
-                    timeUs, option);
+        frame = extractVideoFrameWithCodecFlags(&mClient, trackMeta, source, 0,
+                        timeUs, option);
     }
+
     return frame;
 }
 
@@ -477,7 +445,7 @@ const char *StagefrightMetadataRetriever::extractMetadata(int keyCode) {
         return NULL;
     }
 
-    return strdup(mMetaData.valueAt(index).string());
+    return mMetaData.valueAt(index).string();
 }
 
 void StagefrightMetadataRetriever::parseMetaData() {
@@ -541,6 +509,7 @@ void StagefrightMetadataRetriever::parseMetaData() {
     int32_t videoWidth = -1;
     int32_t videoHeight = -1;
     int32_t audioBitrate = -1;
+    int32_t rotationAngle = -1;
 
     // The overall duration is the duration of the longest track.
     int64_t maxDurationUs = 0;
@@ -568,6 +537,9 @@ void StagefrightMetadataRetriever::parseMetaData() {
 
                 CHECK(trackMeta->findInt32(kKeyWidth, &videoWidth));
                 CHECK(trackMeta->findInt32(kKeyHeight, &videoHeight));
+                if (!trackMeta->findInt32(kKeyRotation, &rotationAngle)) {
+                    rotationAngle = 0;
+                }
             } else if (!strcasecmp(mime, MEDIA_MIMETYPE_TEXT_3GPP)) {
                 const char *lang;
                 trackMeta->findCString(kKeyMediaLanguage, &lang);
@@ -600,6 +572,9 @@ void StagefrightMetadataRetriever::parseMetaData() {
 
         sprintf(tmp, "%d", videoHeight);
         mMetaData.add(METADATA_KEY_VIDEO_HEIGHT, String8(tmp));
+
+        sprintf(tmp, "%d", rotationAngle);
+        mMetaData.add(METADATA_KEY_VIDEO_ROTATION, String8(tmp));
     }
 
     if (numTracks == 1 && hasAudio && audioBitrate >= 0) {
@@ -630,32 +605,6 @@ void StagefrightMetadataRetriever::parseMetaData() {
                 mMetaData.add(
                         METADATA_KEY_MIMETYPE, String8("audio/x-matroska"));
             }
-        }
-
-        // Allow Audio only ASF clips to be considered as audio clips
-        if (!strcasecmp(fileMIME, "video/x-ms-asf") ||
-                !strcasecmp(fileMIME, "audio/x-ms-wma")) {
-            sp<MetaData> trackMeta = mExtractor->getTrackMetaData(0);
-            const char *trackMIME;
-            CHECK(trackMeta->findCString(kKeyMIMEType, &trackMIME));
-
-            if (!strcasecmp("audio/x-ms-wma", trackMIME)) {
-                mMetaData.add(
-                        METADATA_KEY_MIMETYPE, String8("audio/x-ms-wma"));
-            }
-        }
-        // Allow Audio only 3gp clips to be considered as audio clips
-        if (!strcasecmp(fileMIME, "video/3gpp") ||
-                !strcasecmp(fileMIME, "audio/mp4a-latm")) {
-            sp<MetaData> trackMeta = mExtractor->getTrackMetaData(0);
-            const char *trackMIME;
-            CHECK(trackMeta->findCString(kKeyMIMEType, &trackMIME));
-
-            if (!strcasecmp("audio/mp4a-latm", trackMIME)) {
-                mMetaData.add(
-                        METADATA_KEY_MIMETYPE, String8("audio/aac"));
-            }
-
         }
     }
 

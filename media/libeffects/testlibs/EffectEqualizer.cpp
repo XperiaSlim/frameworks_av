@@ -123,23 +123,6 @@ int Equalizer_setParameter(AudioEqualizer * pEqualizer, int32_t *pParam, void *p
 //--- Effect Library Interface Implementation
 //
 
-extern "C" int EffectQueryNumberEffects(uint32_t *pNumEffects) {
-    *pNumEffects = 1;
-    return 0;
-} /* end EffectQueryNumberEffects */
-
-extern "C" int EffectQueryEffect(uint32_t index,
-                                 effect_descriptor_t *pDescriptor) {
-    if (pDescriptor == NULL) {
-        return -EINVAL;
-    }
-    if (index > 0) {
-        return -EINVAL;
-    }
-    memcpy(pDescriptor, &gEqualizerDescriptor, sizeof(effect_descriptor_t));
-    return 0;
-} /* end EffectQueryNext */
-
 extern "C" int EffectCreate(const effect_uuid_t *uuid,
                             int32_t sessionId,
                             int32_t ioId,
@@ -204,7 +187,7 @@ extern "C" int EffectGetDescriptor(const effect_uuid_t *uuid,
     }
 
     if (memcmp(uuid, &gEqualizerDescriptor.uuid, sizeof(effect_uuid_t)) == 0) {
-        memcpy(pDescriptor, &gEqualizerDescriptor, sizeof(effect_descriptor_t));
+        *pDescriptor = gEqualizerDescriptor;
         return 0;
     }
 
@@ -251,8 +234,7 @@ int Equalizer_setConfig(EqualizerContext *pContext, effect_config_t *pConfig)
               (pConfig->inputCfg.channels == AUDIO_CHANNEL_OUT_STEREO));
     CHECK_ARG(pConfig->outputCfg.accessMode == EFFECT_BUFFER_ACCESS_WRITE
               || pConfig->outputCfg.accessMode == EFFECT_BUFFER_ACCESS_ACCUMULATE);
-    CHECK_ARG(pConfig->inputCfg.format == AUDIO_FORMAT_PCM_8_24_BIT
-              || pConfig->inputCfg.format == AUDIO_FORMAT_PCM_16_BIT);
+    CHECK_ARG(pConfig->inputCfg.format == AUDIO_FORMAT_PCM_16_BIT);
 
     int channelCount;
     if (pConfig->inputCfg.channels == AUDIO_CHANNEL_OUT_MONO) {
@@ -262,7 +244,7 @@ int Equalizer_setConfig(EqualizerContext *pContext, effect_config_t *pConfig)
     }
     CHECK_ARG(channelCount <= AudioBiquadFilter::MAX_CHANNELS);
 
-    memcpy(&pContext->config, pConfig, sizeof(effect_config_t));
+    pContext->config = *pConfig;
 
     pContext->pEqualizer->configure(channelCount,
                           pConfig->inputCfg.samplingRate);
@@ -290,7 +272,7 @@ int Equalizer_setConfig(EqualizerContext *pContext, effect_config_t *pConfig)
 
 void Equalizer_getConfig(EqualizerContext *pContext, effect_config_t *pConfig)
 {
-    memcpy(pConfig, &pContext->config, sizeof(effect_config_t));
+    *pConfig = pContext->config;
 }   // end Equalizer_getConfig
 
 
@@ -752,7 +734,7 @@ extern "C" int Equalizer_getDescriptor(effect_handle_t   self,
         return -EINVAL;
     }
 
-    memcpy(pDescriptor, &android::gEqualizerDescriptor, sizeof(effect_descriptor_t));
+    *pDescriptor = android::gEqualizerDescriptor;
 
     return 0;
 }
@@ -771,8 +753,6 @@ audio_effect_library_t AUDIO_EFFECT_LIBRARY_INFO_SYM = {
     version : EFFECT_LIBRARY_API_VERSION,
     name : "Test Equalizer Library",
     implementor : "The Android Open Source Project",
-    query_num_effects : android::EffectQueryNumberEffects,
-    query_effect : android::EffectQueryEffect,
     create_effect : android::EffectCreate,
     release_effect : android::EffectRelease,
     get_descriptor : android::EffectGetDescriptor,

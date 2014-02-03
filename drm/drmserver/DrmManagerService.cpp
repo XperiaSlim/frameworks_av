@@ -87,11 +87,6 @@ status_t DrmManagerService::setDrmServiceListener(
     return DRM_NO_ERROR;
 }
 
-status_t DrmManagerService::installDrmEngine(int uniqueId, const String8& drmEngineFile) {
-    ALOGV("Entering installDrmEngine");
-    return mDrmManager->installDrmEngine(uniqueId, drmEngineFile);
-}
-
 DrmConstraints* DrmManagerService::getConstraints(
             int uniqueId, const String8* path, const int action) {
     ALOGV("Entering getConstraints from content");
@@ -125,9 +120,9 @@ status_t DrmManagerService::saveRights(
     return mDrmManager->saveRights(uniqueId, drmRights, rightsPath, contentPath);
 }
 
-String8 DrmManagerService::getOriginalMimeType(int uniqueId, const String8& path) {
+String8 DrmManagerService::getOriginalMimeType(int uniqueId, const String8& path, int fd) {
     ALOGV("Entering getOriginalMimeType");
-    return mDrmManager->getOriginalMimeType(uniqueId, path);
+    return mDrmManager->getOriginalMimeType(uniqueId, path, fd);
 }
 
 int DrmManagerService::getDrmObjectType(
@@ -214,6 +209,16 @@ DecryptHandle* DrmManagerService::openDecryptSession(
     ALOGV("Entering DrmManagerService::openDecryptSession with uri");
     if (isProtectedCallAllowed()) {
         return mDrmManager->openDecryptSession(uniqueId, uri, mime);
+    }
+
+    return NULL;
+}
+
+DecryptHandle* DrmManagerService::openDecryptSession(
+            int uniqueId, const DrmBuffer& buf, const String8& mimeType) {
+    ALOGV("Entering DrmManagerService::openDecryptSession for streaming");
+    if (isProtectedCallAllowed()) {
+        return mDrmManager->openDecryptSession(uniqueId, buf, mimeType);
     }
 
     return NULL;

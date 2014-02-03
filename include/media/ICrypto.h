@@ -31,7 +31,7 @@ struct ICrypto : public IInterface {
 
     virtual status_t initCheck() const = 0;
 
-    virtual bool isCryptoSchemeSupported(const uint8_t uuid[16]) const = 0;
+    virtual bool isCryptoSchemeSupported(const uint8_t uuid[16]) = 0;
 
     virtual status_t createPlugin(
             const uint8_t uuid[16], const void *data, size_t size) = 0;
@@ -41,7 +41,7 @@ struct ICrypto : public IInterface {
     virtual bool requiresSecureDecoderComponent(
             const char *mime) const = 0;
 
-    virtual status_t decrypt(
+    virtual ssize_t decrypt(
             bool secure,
             const uint8_t key[16],
             const uint8_t iv[16],

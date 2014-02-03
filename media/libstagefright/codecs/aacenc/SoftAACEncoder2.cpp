@@ -292,6 +292,10 @@ static AUDIO_OBJECT_TYPE getAOTFromProfile(OMX_U32 profile) {
         return AOT_AAC_LC;
     } else if (profile == OMX_AUDIO_AACObjectHE) {
         return AOT_SBR;
+    } else if (profile == OMX_AUDIO_AACObjectHE_PS) {
+        return AOT_PS;
+    } else if (profile == OMX_AUDIO_AACObjectLD) {
+        return AOT_ER_AAC_LD;
     } else if (profile == OMX_AUDIO_AACObjectELD) {
         return AOT_ER_AAC_ELD;
     } else {
@@ -481,7 +485,7 @@ void SoftAACEncoder2::onQueueFilled(OMX_U32 portIndex) {
 
         void* inBuffer[]        = { (unsigned char *)mInputFrame };
         INT   inBufferIds[]     = { IN_AUDIO_DATA };
-        INT   inBufferSize[]    = { numBytesPerInputFrame };
+        INT   inBufferSize[]    = { (INT)numBytesPerInputFrame };
         INT   inBufferElSize[]  = { sizeof(int16_t) };
 
         AACENC_BufDesc inBufDesc;

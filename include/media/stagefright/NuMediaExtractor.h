@@ -50,8 +50,12 @@ struct NuMediaExtractor : public RefBase {
 
     status_t setDataSource(int fd, off64_t offset, off64_t size);
 
+    status_t setDataSource(const sp<DataSource> &datasource);
+
     size_t countTracks() const;
     status_t getTrackFormat(size_t index, sp<AMessage> *format) const;
+
+    status_t getFileFormat(sp<AMessage> *format) const;
 
     status_t selectTrack(size_t index);
     status_t unselectTrack(size_t index);

@@ -154,7 +154,7 @@ OMX_ERRORTYPE SoftAMR::internalGetParameter(
 
             amrParams->nChannels = 1;
             amrParams->eAMRDTXMode = OMX_AUDIO_AMRDTXModeOff;
-            amrParams->eAMRFrameFormat = OMX_AUDIO_AMRFrameFormatConformance;
+            amrParams->eAMRFrameFormat = OMX_AUDIO_AMRFrameFormatFSF;
 
             if (!isConfigured()) {
                 amrParams->nBitRate = 0;
@@ -352,7 +352,14 @@ void SoftAMR::onQueueFilled(OMX_U32 portIndex) {
             }
 
             size_t frameSize = getFrameSize(mode);
-            CHECK_GE(inHeader->nFilledLen, frameSize);
+            if (inHeader->nFilledLen < frameSize) {
+                ALOGE("Filled length vs frameSize %d vs %d. Corrupt clip?",
+                   inHeader->nFilledLen, frameSize);
+
+                notify(OMX_EventError, OMX_ErrorUndefined, 0, NULL);
+                mSignalledError = true;
+                return;
+            }
 
             int16_t *outPtr = (int16_t *)outHeader->pBuffer;
 
@@ -429,6 +436,9 @@ void SoftAMR::onQueueFilled(OMX_U32 portIndex) {
 }
 
 void SoftAMR::onPortFlushCompleted(OMX_U32 portIndex) {
+        ALOGE("onPortFlushCompleted portindex %d, resetting frame ",portIndex);
+        if(portIndex == 0)
+           Speech_Decode_Frame_reset(mState);
 }
 
 void SoftAMR::onPortEnableCompleted(OMX_U32 portIndex, bool enabled) {
@@ -455,6 +465,11 @@ void SoftAMR::onPortEnableCompleted(OMX_U32 portIndex, bool enabled) {
             break;
         }
     }
+}
+
+void SoftAMR::onReset() {
+    mSignalledError = false;
+    mOutputPortSettingsChange = NONE;
 }
 
 }  // namespace android

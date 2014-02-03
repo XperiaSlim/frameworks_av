@@ -1,6 +1,5 @@
 /*
  * Copyright (C) 2009 The Android Open Source Project
- * Copyright (c) 2011-2012, Code Aurora Forum. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,10 +13,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
-/*--------------------------------------------------------------------------
-Copyright (c) 2012, Code Aurora Forum. All rights reserved.
---------------------------------------------------------------------------*/
 
 #ifndef OMX_CODEC_H_
 
@@ -65,13 +60,6 @@ struct OMXCodec : public MediaSource,
 
         // Secure decoding mode
         kUseSecureInputBuffers = 256,
-#ifdef QCOM_HARDWARE
-        kEnableThumbnailMode = 512,
-
-        kEnableGrallocUsagePrivateCPBuffer = 16384,
-
-        kUseMinBufferCount = 32768,
-#endif
     };
     static sp<MediaSource> Create(
             const sp<IOMX> &omx,
@@ -110,13 +98,16 @@ struct OMXCodec : public MediaSource,
         kDecoderLiesAboutNumberOfChannels     = 256,
         kInputBufferSizesAreBogus             = 512,
         kSupportsMultipleFramesPerInputBuffer = 1024,
-        kAvoidMemcopyInputRecordingFrames     = 2048,
-        kRequiresLargerEncoderOutputBuffer    = 4096,
-        kOutputBuffersAreUnreadable           = 8192,
-#ifdef QCOM_HARDWARE
-        kRequiresGlobalFlush                  = 0x20000000, // 2^29
-        kRequiresWMAProComponent              = 0x40000000, //2^30
+        kRequiresLargerEncoderOutputBuffer    = 2048,
+        kOutputBuffersAreUnreadable           = 4096,
+#if defined(OMAP_ENHANCEMENT)
+        kAvoidMemcopyInputRecordingFrames     = 0x20000000,
 #endif
+    };
+
+    struct CodecNameAndQuirks {
+        String8 mName;
+        uint32_t mQuirks;
     };
 
     // for use by ACodec
@@ -124,8 +115,7 @@ struct OMXCodec : public MediaSource,
             const char *mime,
             bool createEncoder, const char *matchComponentName,
             uint32_t flags,
-            Vector<String8> *matchingCodecs,
-            Vector<uint32_t> *matchingCodecQuirks = NULL);
+            Vector<CodecNameAndQuirks> *matchingCodecNamesAndQuirks);
 
     static uint32_t getComponentQuirks(
             const MediaCodecList *list, size_t index);
@@ -152,18 +142,10 @@ private:
         EXECUTING_TO_IDLE,
         IDLE_TO_LOADED,
         RECONFIGURING,
-#ifdef QCOM_HARDWARE
-        PAUSING,
-        FLUSHING,
-        PAUSED,
-#endif
         ERROR
     };
 
     enum {
-#ifdef QCOM_HARDWARE
-        kPortIndexBoth   = -1,
-#endif
         kPortIndexInput  = 0,
         kPortIndexOutput = 1
     };
@@ -252,12 +234,6 @@ private:
     // a video encoder.
     List<int64_t> mDecodingTimeList;
 
-#ifdef QCOM_HARDWARE
-    bool mThumbnailMode;
-    bool mSPSParsed;
-    bool mUseArbitraryMode;
-#endif
-
     OMXCodec(const sp<IOMX> &omx, IOMX::node_id node,
              uint32_t quirks, uint32_t flags,
              bool isEncoder, const char *mime, const char *componentName,
@@ -276,16 +252,13 @@ private:
             int32_t aacProfile, bool isADTS);
 
     void setG711Format(int32_t numChannels);
-#ifdef QCOM_HARDWARE
-    void setQCELPFormat( int32_t sampleRate, int32_t numChannels, int32_t bitRate);
-    void setEVRCFormat( int32_t sampleRate, int32_t numChannels, int32_t bitRate);
-#endif
+
     status_t setVideoPortFormatType(
             OMX_U32 portIndex,
             OMX_VIDEO_CODINGTYPE compressionFormat,
             OMX_COLOR_FORMATTYPE colorFormat);
 
-    void setVideoInputFormat(
+    status_t setVideoInputFormat(
             const char *mime, const sp<MetaData>& meta);
 
     status_t setupBitRate(int32_t bitRate);
@@ -306,7 +279,7 @@ private:
             CodecProfileLevel& profileLevel);
 
     status_t setVideoOutputFormat(
-            const char *mime, OMX_U32 width, OMX_U32 height);
+            const char *mime, const sp<MetaData>& meta);
 
     void setImageOutputFormat(
             OMX_COLOR_FORMATTYPE format, OMX_U32 width, OMX_U32 height);
@@ -321,6 +294,9 @@ private:
 
     status_t allocateBuffers();
     status_t allocateBuffersOnPort(OMX_U32 portIndex);
+#ifdef USE_SAMSUNG_COLORFORMAT
+    void setNativeWindowColorFormat(OMX_COLOR_FORMATTYPE &eNativeColorFormat);
+#endif
     status_t allocateOutputBuffersFromNativeWindow();
 
     status_t queueBufferToNativeWindow(BufferInfo *info);
@@ -374,40 +350,34 @@ private:
     void dumpPortStatus(OMX_U32 portIndex);
 
     status_t configureCodec(const sp<MetaData> &meta);
-
+#if defined(OMAP_ENHANCEMENT)
     void restorePatchedDataPointer(BufferInfo *info);
+#endif
 
     status_t applyRotation();
     status_t waitForBufferFilled_l();
 
     int64_t getDecodingTimeUs();
 
-#ifdef QCOM_HARDWARE
-    void parseFlags();
-#endif
     status_t parseAVCCodecSpecificData(
             const void *data, size_t size,
             unsigned *profile, unsigned *level);
 
-#ifdef QCOM_HARDWARE
-    status_t flushBuffersOnError(void);
-#endif
+    status_t stopOmxComponent_l();
 
     OMXCodec(const OMXCodec &);
     OMXCodec &operator=(const OMXCodec &);
-#ifdef QCOM_HARDWARE
-    status_t setWMAFormat(const sp<MetaData> &inputFormat);
-    void setAC3Format(int32_t numChannels, int32_t sampleRate);
-    status_t releaseMediaBuffersOn(OMX_U32 portIndex);
-
-    bool mNumBFrames;
-#endif
 };
 
 struct CodecCapabilities {
+    enum {
+        kFlagSupportsAdaptivePlayback = 1 << 0,
+    };
+
     String8 mComponentName;
     Vector<CodecProfileLevel> mProfileLevels;
     Vector<OMX_U32> mColorFormats;
+    uint32_t mFlags;
 };
 
 // Return a vector of componentNames with supported profile/level pairs

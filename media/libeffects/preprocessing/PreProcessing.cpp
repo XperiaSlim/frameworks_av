@@ -517,6 +517,10 @@ int AecSetDevice(preproc_effect_t *effect, uint32_t device)
     webrtc::EchoControlMobile *aec = static_cast<webrtc::EchoControlMobile *>(effect->engine);
     webrtc::EchoControlMobile::RoutingMode mode = webrtc::EchoControlMobile::kQuietEarpieceOrHeadset;
 
+    if (audio_is_input_device(device)) {
+        return 0;
+    }
+
     switch(device) {
     case AUDIO_DEVICE_OUT_EARPIECE:
         mode = webrtc::EchoControlMobile::kEarpiece;
@@ -1700,7 +1704,7 @@ int PreProcessingFx_GetDescriptor(effect_handle_t   self,
         return -EINVAL;
     }
 
-    memcpy(pDescriptor, sDescriptors[effect->procId], sizeof(effect_descriptor_t));
+    *pDescriptor = *sDescriptors[effect->procId];
 
     return 0;
 }
@@ -1814,30 +1818,6 @@ const struct effect_interface_s sEffectInterfaceReverse = {
 // Effect Library Interface Implementation
 //------------------------------------------------------------------------------
 
-int PreProcessingLib_QueryNumberEffects(uint32_t *pNumEffects)
-{
-    if (PreProc_Init() != 0) {
-        return sInitStatus;
-    }
-    if (pNumEffects == NULL) {
-        return -EINVAL;
-    }
-    *pNumEffects = PREPROC_NUM_EFFECTS;
-    return sInitStatus;
-}
-
-int PreProcessingLib_QueryEffect(uint32_t index, effect_descriptor_t *pDescriptor)
-{
-    if (PreProc_Init() != 0) {
-        return sInitStatus;
-    }
-    if (index >= PREPROC_NUM_EFFECTS) {
-        return -EINVAL;
-    }
-    memcpy(pDescriptor, sDescriptors[index], sizeof(effect_descriptor_t));
-    return 0;
-}
-
 int PreProcessingLib_Create(const effect_uuid_t *uuid,
                             int32_t             sessionId,
                             int32_t             ioId,
@@ -1905,17 +1885,17 @@ int PreProcessingLib_GetDescriptor(const effect_uuid_t *uuid,
 
     ALOGV("PreProcessingLib_GetDescriptor() got fx %s", desc->name);
 
-    memcpy(pDescriptor, desc, sizeof(effect_descriptor_t));
+    *pDescriptor = *desc;
     return 0;
 }
 
+// This is the only symbol that needs to be exported
+__attribute__ ((visibility ("default")))
 audio_effect_library_t AUDIO_EFFECT_LIBRARY_INFO_SYM = {
     tag : AUDIO_EFFECT_LIBRARY_TAG,
     version : EFFECT_LIBRARY_API_VERSION,
     name : "Audio Preprocessing Library",
     implementor : "The Android Open Source Project",
-    query_num_effects : PreProcessingLib_QueryNumberEffects,
-    query_effect : PreProcessingLib_QueryEffect,
     create_effect : PreProcessingLib_Create,
     release_effect : PreProcessingLib_Release,
     get_descriptor : PreProcessingLib_GetDescriptor

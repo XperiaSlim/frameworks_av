@@ -28,10 +28,26 @@
 
 namespace android {
 
+const int64_t kNearEOSMarkUs = 2000000ll; // 2 secs
+
 AnotherPacketSource::AnotherPacketSource(const sp<MetaData> &meta)
     : mIsAudio(false),
-      mFormat(meta),
+      mFormat(NULL),
+      mLastQueuedTimeUs(0),
       mEOSResult(OK) {
+    setFormat(meta);
+}
+
+void AnotherPacketSource::setFormat(const sp<MetaData> &meta) {
+    CHECK(mFormat == NULL);
+
+    mIsAudio = false;
+
+    if (meta == NULL) {
+        return;
+    }
+
+    mFormat = meta;
     const char *mime;
     CHECK(meta->findCString(kKeyMIMEType, &mime));
 
@@ -40,17 +56,6 @@ AnotherPacketSource::AnotherPacketSource(const sp<MetaData> &meta)
     } else {
         CHECK(!strncasecmp("video/", mime, 6));
     }
-}
-
-void AnotherPacketSource::setFormat(const sp<MetaData> &meta) {
-    Mutex::Autolock autoLock(mLock);
-    CHECK(mFormat == NULL);
-    mFormat = meta;
-}
-
-void AnotherPacketSource::updateFormat(const sp<MetaData> &meta) {
-    Mutex::Autolock autoLock(mLock);
-    mFormat = meta;
 }
 
 AnotherPacketSource::~AnotherPacketSource() {
@@ -147,32 +152,27 @@ void AnotherPacketSource::queueAccessUnit(const sp<ABuffer> &buffer) {
         return;
     }
 
-    int64_t timeUs;
-    CHECK(buffer->meta()->findInt64("timeUs", &timeUs));
-    ALOGV("queueAccessUnit timeUs=%lld us (%.2f secs)", timeUs, timeUs / 1E6);
+    CHECK(buffer->meta()->findInt64("timeUs", &mLastQueuedTimeUs));
+    ALOGV("queueAccessUnit timeUs=%lld us (%.2f secs)", mLastQueuedTimeUs, mLastQueuedTimeUs / 1E6);
 
     Mutex::Autolock autoLock(mLock);
     mBuffers.push_back(buffer);
     mCondition.signal();
 }
 
-int AnotherPacketSource::getQueueSize() {
-    return mBuffers.size();
+void AnotherPacketSource::clear() {
+    Mutex::Autolock autoLock(mLock);
+
+    mBuffers.clear();
+    mEOSResult = OK;
+
+    mFormat = NULL;
 }
 
 void AnotherPacketSource::queueDiscontinuity(
         ATSParser::DiscontinuityType type,
         const sp<AMessage> &extra) {
     Mutex::Autolock autoLock(mLock);
-
-    if (type == ATSParser::DISCONTINUITY_TS_PLAYER_SEEK ||
-        type == ATSParser::DISCONTINUITY_HLS_PLAYER_SEEK) {
-        ALOGI("Flushing all Access units for seek");
-        mBuffers.clear();
-        mEOSResult = OK;
-        mCondition.signal();
-        return;
-    }
 
     // Leave only discontinuities in the queue.
     List<sp<ABuffer> >::iterator it = mBuffers.begin();
@@ -190,6 +190,7 @@ void AnotherPacketSource::queueDiscontinuity(
     }
 
     mEOSResult = OK;
+    mLastQueuedTimeUs = 0;
 
     sp<ABuffer> buffer = new ABuffer(0);
     buffer->meta()->setInt32("discontinuity", static_cast<int32_t>(type));
@@ -264,6 +265,17 @@ status_t AnotherPacketSource::nextBufferTime(int64_t *timeUs) {
     CHECK(buffer->meta()->findInt64("timeUs", timeUs));
 
     return OK;
+}
+
+bool AnotherPacketSource::isFinished(int64_t duration) const {
+    if (duration > 0) {
+        int64_t diff = duration - mLastQueuedTimeUs;
+        if (diff < kNearEOSMarkUs && diff > -kNearEOSMarkUs) {
+            ALOGV("Detecting EOS due to near end");
+            return true;
+        }
+    }
+    return (mEOSResult != OK);
 }
 
 }  // namespace android

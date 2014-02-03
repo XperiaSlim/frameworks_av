@@ -2,11 +2,7 @@ LOCAL_PATH := $(call my-dir)
 include $(CLEAR_VARS)
 include frameworks/av/media/libstagefright/codecs/common/Config.mk
 
-ifeq ($(ARCH_ARM_HAVE_ARMV7A),true)
 AAC_LIBRARY = fraunhofer
-else
-AAC_LIBRARY = visualon
-endif
 
 LOCAL_SRC_FILES := basic_op/basicop2.c basic_op/oper_32b.c
 
@@ -75,8 +71,6 @@ LOCAL_C_INCLUDES := \
 	$(LOCAL_PATH)/inc \
 	$(LOCAL_PATH)/basic_op
 
-LOCAL_CFLAGS := $(VO_CFLAGS)
-
 ifeq ($(VOTT), v5)
 LOCAL_CFLAGS += -DARMV5E -DARM_INASM -DARMV5_INASM
 LOCAL_C_INCLUDES += $(LOCAL_PATH)/src/asm/ARMV5E
@@ -115,7 +109,7 @@ ifeq ($(AAC_LIBRARY), fraunhofer)
   LOCAL_STATIC_LIBRARIES := libFraunhoferAAC
 
   LOCAL_SHARED_LIBRARIES := \
-          libstagefright_omx libstagefright_foundation libutils
+          libstagefright_omx libstagefright_foundation libutils liblog
 
   LOCAL_MODULE := libstagefright_soft_aacenc
   LOCAL_MODULE_TAGS := optional
@@ -138,7 +132,7 @@ else # visualon
           libstagefright_aacenc
 
   LOCAL_SHARED_LIBRARIES := \
-          libstagefright_omx libstagefright_foundation libutils \
+          libstagefright_omx libstagefright_foundation libutils liblog \
           libstagefright_enc_common
 
   LOCAL_MODULE := libstagefright_soft_aacenc

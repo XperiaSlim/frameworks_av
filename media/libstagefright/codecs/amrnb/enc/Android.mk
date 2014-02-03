@@ -64,8 +64,7 @@ LOCAL_C_INCLUDES := \
         frameworks/av/media/libstagefright/include \
         $(LOCAL_PATH)/src \
         $(LOCAL_PATH)/include \
-        $(LOCAL_PATH)/../common/include \
-        $(LOCAL_PATH)/../common
+        $(LOCAL_PATH)/../common/include
 
 LOCAL_CFLAGS := \
         -DOSCL_UNUSED_ARG=
@@ -93,7 +92,7 @@ LOCAL_STATIC_LIBRARIES := \
         libstagefright_amrnbenc
 
 LOCAL_SHARED_LIBRARIES := \
-        libstagefright_omx libstagefright_foundation libutils \
+        libstagefright_omx libstagefright_foundation libutils liblog \
         libstagefright_amrnb_common
 
 LOCAL_MODULE := libstagefright_soft_amrnbenc

@@ -22,6 +22,8 @@
 #include <string.h>
 
 #include <media/stagefright/foundation/ADebug.h>
+#include <media/stagefright/foundation/AString.h>
+#include <media/stagefright/foundation/hexdump.h>
 #include <media/stagefright/MetaData.h>
 
 namespace android {
@@ -87,6 +89,9 @@ bool MetaData::setRect(
     return setData(key, TYPE_RECT, &r, sizeof(r));
 }
 
+/**
+ * Note that the returned pointer becomes invalid when additional metadata is set.
+ */
 bool MetaData::findCString(uint32_t key, const char **value) {
     uint32_t type;
     const void *data;
@@ -280,6 +285,7 @@ void MetaData::typed_data::freeStorage() {
     if (!usesReservoir()) {
         if (u.ext_data) {
             free(u.ext_data);
+            u.ext_data = NULL;
         }
     }
 
@@ -318,6 +324,12 @@ String8 MetaData::typed_data::asString() const {
 
         default:
             out = String8::format("(unknown type %d, size %d)", mType, mSize);
+            if (mSize <= 48) { // if it's less than three lines of hex data, dump it
+                AString foo;
+                hexdump(data, mSize, 0, &foo);
+                out.append("\n");
+                out.append(foo.c_str());
+            }
             break;
     }
     return out;

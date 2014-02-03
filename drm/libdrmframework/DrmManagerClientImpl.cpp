@@ -86,15 +86,6 @@ status_t DrmManagerClientImpl::setOnInfoListener(
             (NULL != infoListener.get()) ? this : NULL);
 }
 
-status_t DrmManagerClientImpl::installDrmEngine(
-        int uniqueId, const String8& drmEngineFile) {
-    status_t status = DRM_ERROR_UNKNOWN;
-    if (EMPTY_STRING != drmEngineFile) {
-        status = getDrmManagerService()->installDrmEngine(uniqueId, drmEngineFile);
-    }
-    return status;
-}
-
 DrmConstraints* DrmManagerClientImpl::getConstraints(
         int uniqueId, const String8* path, const int action) {
     DrmConstraints *drmConstraints = NULL;
@@ -147,10 +138,10 @@ status_t DrmManagerClientImpl::saveRights(int uniqueId, const DrmRights& drmRigh
 }
 
 String8 DrmManagerClientImpl::getOriginalMimeType(
-        int uniqueId, const String8& path) {
+        int uniqueId, const String8& path, int fd) {
     String8 mimeType = EMPTY_STRING;
     if (EMPTY_STRING != path) {
-        mimeType = getDrmManagerService()->getOriginalMimeType(uniqueId, path);
+        mimeType = getDrmManagerService()->getOriginalMimeType(uniqueId, path, fd);
     }
     return mimeType;
 }
@@ -270,6 +261,11 @@ sp<DecryptHandle> DrmManagerClientImpl::openDecryptSession(
         handle = getDrmManagerService()->openDecryptSession(uniqueId, uri, mime);
     }
     return handle;
+}
+
+sp<DecryptHandle> DrmManagerClientImpl::openDecryptSession(
+            int uniqueId, const DrmBuffer& buf, const String8& mimeType) {
+    return getDrmManagerService()->openDecryptSession(uniqueId, buf, mimeType);
 }
 
 status_t DrmManagerClientImpl::closeDecryptSession(

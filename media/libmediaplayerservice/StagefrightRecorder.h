@@ -1,6 +1,5 @@
 /*
  * Copyright (C) 2009 The Android Open Source Project
- * Copyright (c) 2012, Code Aurora Forum. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -36,7 +35,7 @@ struct MediaWriter;
 class MetaData;
 struct AudioSource;
 class MediaProfiles;
-class ISurfaceTexture;
+class IGraphicBufferProducer;
 class SurfaceMediaSource;
 
 struct StagefrightRecorder : public MediaRecorderBase {
@@ -52,11 +51,12 @@ struct StagefrightRecorder : public MediaRecorderBase {
     virtual status_t setVideoSize(int width, int height);
     virtual status_t setVideoFrameRate(int frames_per_second);
     virtual status_t setCamera(const sp<ICamera>& camera, const sp<ICameraRecordingProxy>& proxy);
-    virtual status_t setPreviewSurface(const sp<Surface>& surface);
+    virtual status_t setPreviewSurface(const sp<IGraphicBufferProducer>& surface);
     virtual status_t setOutputFile(const char *path);
     virtual status_t setOutputFile(int fd, int64_t offset, int64_t length);
     virtual status_t setParameters(const String8& params);
     virtual status_t setListener(const sp<IMediaRecorderClient>& listener);
+    virtual status_t setClientName(const String16& clientName);
     virtual status_t prepare();
     virtual status_t start();
     virtual status_t pause();
@@ -66,13 +66,15 @@ struct StagefrightRecorder : public MediaRecorderBase {
     virtual status_t getMaxAmplitude(int *max);
     virtual status_t dump(int fd, const Vector<String16>& args) const;
     // Querying a SurfaceMediaSourcer
-    virtual sp<ISurfaceTexture> querySurfaceMediaSource() const;
+    virtual sp<IGraphicBufferProducer> querySurfaceMediaSource() const;
 
 private:
     sp<ICamera> mCamera;
     sp<ICameraRecordingProxy> mCameraProxy;
-    sp<Surface> mPreviewSurface;
+    sp<IGraphicBufferProducer> mPreviewSurface;
     sp<IMediaRecorderClient> mListener;
+    String16 mClientName;
+    uid_t mClientUid;
     sp<MediaWriter> mWriter;
     int mOutputFd;
     sp<AudioSource> mAudioSourceNode;
@@ -117,7 +119,7 @@ private:
 
     bool mStarted;
     // Needed when GLFrames are encoded.
-    // An <ISurfaceTexture> pointer
+    // An <IGraphicBufferProducer> pointer
     // will be sent to the client side using which the
     // frame buffers will be queued and dequeued
     sp<SurfaceMediaSource> mSurfaceMediaSource;
@@ -132,15 +134,13 @@ private:
         sp<MetaData> *meta);
     status_t startMPEG4Recording();
     status_t startAMRRecording();
-#if defined(QCOM_HARDWARE) && defined(QCOM_FM_ENABLED)
-    status_t startFMA2DPWriter();
-#endif
     status_t startAACRecording();
     status_t startRawAudioRecording();
     status_t startRTPRecording();
     status_t startMPEG2TSRecording();
     sp<MediaSource> createAudioSource();
-    status_t checkVideoEncoderCapabilities();
+    status_t checkVideoEncoderCapabilities(
+            bool *supportsCameraSourceMetaDataMode);
     status_t checkAudioEncoderCapabilities();
     // Generic MediaSource set-up. Returns the appropriate
     // source (CameraSource or SurfaceMediaSource)
@@ -191,11 +191,6 @@ private:
 
     StagefrightRecorder(const StagefrightRecorder &);
     StagefrightRecorder &operator=(const StagefrightRecorder &);
-
-#ifdef QCOM_HARDWARE
-    /* extension */
-    status_t startExtendedRecording();
-#endif
 };
 
 }  // namespace android

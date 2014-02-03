@@ -20,6 +20,8 @@
 
 #include "NuPlayerSource.h"
 
+#include "ATSParser.h"
+
 #include <media/stagefright/foundation/AHandlerReflector.h>
 
 namespace android {
@@ -27,30 +29,36 @@ namespace android {
 struct ALooper;
 struct AnotherPacketSource;
 struct MyHandler;
+struct SDPLoader;
 
 struct NuPlayer::RTSPSource : public NuPlayer::Source {
     RTSPSource(
+            const sp<AMessage> &notify,
             const char *url,
             const KeyedVector<String8, String8> *headers,
             bool uidValid = false,
-            uid_t uid = 0);
+            uid_t uid = 0,
+            bool isSDP = false);
 
+    virtual void prepareAsync();
     virtual void start();
     virtual void stop();
+    virtual void pause();
+    virtual void resume();
 
     virtual status_t feedMoreTSData();
 
-    virtual sp<MetaData> getFormat(bool audio);
     virtual status_t dequeueAccessUnit(bool audio, sp<ABuffer> *accessUnit);
 
     virtual status_t getDuration(int64_t *durationUs);
     virtual status_t seekTo(int64_t seekTimeUs);
-    virtual bool isSeekable();
 
     void onMessageReceived(const sp<AMessage> &msg);
 
 protected:
     virtual ~RTSPSource();
+
+    virtual sp<MetaData> getFormatMeta(bool audio);
 
 private:
     enum {
@@ -85,30 +93,40 @@ private:
     bool mUIDValid;
     uid_t mUID;
     uint32_t mFlags;
+    bool mIsSDP;
     State mState;
     status_t mFinalResult;
     uint32_t mDisconnectReplyID;
-    bool mStartingUp;
+    bool mBuffering;
 
     sp<ALooper> mLooper;
     sp<AHandlerReflector<RTSPSource> > mReflector;
     sp<MyHandler> mHandler;
+    sp<SDPLoader> mSDPLoader;
 
     Vector<TrackInfo> mTracks;
     sp<AnotherPacketSource> mAudioTrack;
     sp<AnotherPacketSource> mVideoTrack;
 
+    sp<ATSParser> mTSParser;
+
     int32_t mSeekGeneration;
+
+    int64_t mEOSTimeoutAudio;
+    int64_t mEOSTimeoutVideo;
 
     sp<AnotherPacketSource> getSource(bool audio);
 
     void onConnected();
+    void onSDPLoaded(const sp<AMessage> &msg);
     void onDisconnected(const sp<AMessage> &msg);
     void finishDisconnectIfPossible();
 
     void performSeek(int64_t seekTimeUs);
 
     bool haveSufficientDataOnAllTracks();
+
+    void setEOSTimeout(bool audio, int64_t timeout);
 
     DISALLOW_EVIL_CONSTRUCTORS(RTSPSource);
 };

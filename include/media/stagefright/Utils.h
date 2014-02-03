@@ -14,17 +14,16 @@
  * limitations under the License.
  */
 
-/*--------------------------------------------------------------------------
-Copyright (c) 2012, Code Aurora Forum. All rights reserved.
---------------------------------------------------------------------------*/
-
 #ifndef UTILS_H_
 
 #define UTILS_H_
 
+#include <media/stagefright/foundation/AString.h>
 #include <stdint.h>
 #include <utils/Errors.h>
 #include <utils/RefBase.h>
+#include <system/audio.h>
+#include <media/MediaPlayerInterface.h>
 
 namespace android {
 
@@ -46,20 +45,20 @@ struct MetaData;
 struct AMessage;
 status_t convertMetaDataToMessage(
         const sp<MetaData> &meta, sp<AMessage> *format);
+void convertMessageToMetaData(
+        const sp<AMessage> &format, sp<MetaData> &meta);
 
-#ifdef QCOM_HARDWARE
-typedef struct {
-    uint8_t mProfile;
-    uint8_t mLevel;
-    int32_t mHeightInMBs;
-    int32_t mWidthInMBs;
-    int32_t mNumRefFrames;
-    int32_t mInterlaced;
-} SpsInfo;
+AString MakeUserAgent();
 
-status_t
-parseSps(uint16_t naluSize,const uint8_t *encodedBytes, SpsInfo *info);
-#endif
+// Convert a MIME type to a AudioSystem::audio_format
+status_t mapMimeToAudioFormat(audio_format_t& format, const char* mime);
+
+// Send information from MetaData to the HAL via AudioSink
+status_t sendMetaDataToHal(sp<MediaPlayerBase::AudioSink>& sink, const sp<MetaData>& meta);
+
+// Check whether the stream defined by meta can be offloaded to hardware
+bool canOffloadStream(const sp<MetaData>& meta, bool hasVideo,
+                      bool isStreaming, audio_stream_type_t streamType);
 
 }  // namespace android
 

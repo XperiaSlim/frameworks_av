@@ -30,17 +30,30 @@
 #include <sys/time.h>
 
 #include <media/stagefright/foundation/ADebug.h>
+#include <media/stagefright/foundation/ALooper.h>
+#include <binder/IServiceManager.h>
+#include <powermanager/PowerManager.h>
+#include <binder/IPCThreadState.h>
+#include <utils/CallStack.h>
 
 namespace android {
+
+static int64_t kWakelockMinDelay = 100000ll;  // 100ms
 
 TimedEventQueue::TimedEventQueue()
     : mNextEventID(1),
       mRunning(false),
-      mStopped(false) {
+      mStopped(false),
+      mDeathRecipient(new PMDeathRecipient(this)),
+      mWakeLockCount(0) {
 }
 
 TimedEventQueue::~TimedEventQueue() {
     stop();
+    if (mPowerManager != 0) {
+        sp<IBinder> binder = mPowerManager->asBinder();
+        binder->unlinkToDeath(mDeathRecipient);
+    }
 }
 
 void TimedEventQueue::start() {
@@ -75,6 +88,9 @@ void TimedEventQueue::stop(bool flush) {
     void *dummy;
     pthread_join(mThread, &dummy);
 
+    // some events may be left in the queue if we did not flush and the wake lock
+    // must be released.
+    releaseWakeLock_l(true /*force*/);
     mQueue.clear();
 
     mRunning = false;
@@ -94,7 +110,7 @@ TimedEventQueue::event_id TimedEventQueue::postEventToBack(
 TimedEventQueue::event_id TimedEventQueue::postEventWithDelay(
         const sp<Event> &event, int64_t delay_us) {
     CHECK(delay_us >= 0);
-    return postTimedEvent(event, getRealTimeUs() + delay_us);
+    return postTimedEvent(event, ALooper::GetNowUs() + delay_us);
 }
 
 TimedEventQueue::event_id TimedEventQueue::postTimedEvent(
@@ -111,11 +127,16 @@ TimedEventQueue::event_id TimedEventQueue::postTimedEvent(
     QueueItem item;
     item.event = event;
     item.realtime_us = realtime_us;
+    item.has_wakelock = false;
 
     if (it == mQueue.begin()) {
         mQueueHeadChangedCondition.signal();
     }
 
+    if (realtime_us > ALooper::GetNowUs() + kWakelockMinDelay) {
+        acquireWakeLock_l();
+        item.has_wakelock = true;
+    }
     mQueue.insert(it, item);
 
     mQueueNotEmptyCondition.signal();
@@ -170,20 +191,14 @@ void TimedEventQueue::cancelEvents(
         ALOGV("cancelling event %d", (*it).event->eventID());
 
         (*it).event->setEventID(0);
+        if ((*it).has_wakelock) {
+            releaseWakeLock_l();
+        }
         it = mQueue.erase(it);
-
         if (stopAfterFirstMatch) {
             return;
         }
     }
-}
-
-// static
-int64_t TimedEventQueue::getRealTimeUs() {
-    struct timeval tv;
-    gettimeofday(&tv, NULL);
-
-    return (int64_t)tv.tv_sec * 1000000ll + tv.tv_usec;
 }
 
 // static
@@ -225,7 +240,7 @@ void TimedEventQueue::threadEntry() {
                 List<QueueItem>::iterator it = mQueue.begin();
                 eventID = (*it).event->eventID();
 
-                now_us = getRealTimeUs();
+                now_us = ALooper::GetNowUs();
                 int64_t when_us = (*it).realtime_us;
 
                 int64_t delay_us;
@@ -258,7 +273,7 @@ void TimedEventQueue::threadEntry() {
                 if (!timeoutCapped && err == -ETIMEDOUT) {
                     // We finally hit the time this event is supposed to
                     // trigger.
-                    now_us = getRealTimeUs();
+                    now_us = ALooper::GetNowUs();
                     break;
                 }
             }
@@ -285,9 +300,10 @@ sp<TimedEventQueue::Event> TimedEventQueue::removeEventFromQueue_l(
         if ((*it).event->eventID() == id) {
             sp<Event> event = (*it).event;
             event->setEventID(0);
-
+            if ((*it).has_wakelock) {
+                releaseWakeLock_l();
+            }
             mQueue.erase(it);
-
             return event;
         }
     }
@@ -295,6 +311,71 @@ sp<TimedEventQueue::Event> TimedEventQueue::removeEventFromQueue_l(
     ALOGW("Event %d was not found in the queue, already cancelled?", id);
 
     return NULL;
+}
+
+void TimedEventQueue::acquireWakeLock_l()
+{
+    if (mWakeLockCount == 0) {
+        CHECK(mWakeLockToken == 0);
+        if (mPowerManager == 0) {
+            // use checkService() to avoid blocking if power service is not up yet
+            sp<IBinder> binder =
+                defaultServiceManager()->checkService(String16("power"));
+            if (binder == 0) {
+                ALOGW("cannot connect to the power manager service");
+            } else {
+                mPowerManager = interface_cast<IPowerManager>(binder);
+                binder->linkToDeath(mDeathRecipient);
+            }
+        }
+        if (mPowerManager != 0) {
+            sp<IBinder> binder = new BBinder();
+            int64_t token = IPCThreadState::self()->clearCallingIdentity();
+            status_t status = mPowerManager->acquireWakeLock(POWERMANAGER_PARTIAL_WAKE_LOCK,
+                                                             binder,
+                                                             String16("TimedEventQueue"),
+                                                             String16("media"));
+            IPCThreadState::self()->restoreCallingIdentity(token);
+            if (status == NO_ERROR) {
+                mWakeLockToken = binder;
+                mWakeLockCount++;
+            }
+        }
+    } else {
+        mWakeLockCount++;
+    }
+}
+
+void TimedEventQueue::releaseWakeLock_l(bool force)
+{
+    if (mWakeLockCount == 0) {
+        return;
+    }
+    if (force) {
+        // Force wakelock release below by setting reference count to 1.
+        mWakeLockCount = 1;
+    }
+    if (--mWakeLockCount == 0) {
+        CHECK(mWakeLockToken != 0);
+        if (mPowerManager != 0) {
+            int64_t token = IPCThreadState::self()->clearCallingIdentity();
+            mPowerManager->releaseWakeLock(mWakeLockToken, 0);
+            IPCThreadState::self()->restoreCallingIdentity(token);
+        }
+        mWakeLockToken.clear();
+    }
+}
+
+void TimedEventQueue::clearPowerManager()
+{
+    Mutex::Autolock _l(mLock);
+    releaseWakeLock_l(true /*force*/);
+    mPowerManager.clear();
+}
+
+void TimedEventQueue::PMDeathRecipient::binderDied(const wp<IBinder>& who)
+{
+    mQueue->clearPowerManager();
 }
 
 }  // namespace android

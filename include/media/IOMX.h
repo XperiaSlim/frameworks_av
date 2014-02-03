@@ -19,6 +19,7 @@
 #define ANDROID_IOMX_H_
 
 #include <binder/IInterface.h>
+#include <gui/IGraphicBufferProducer.h>
 #include <ui/GraphicBuffer.h>
 #include <utils/List.h>
 #include <utils/String8.h>
@@ -82,6 +83,10 @@ public:
     virtual status_t storeMetaDataInBuffers(
             node_id node, OMX_U32 port_index, OMX_BOOL enable) = 0;
 
+    virtual status_t prepareForAdaptivePlayback(
+            node_id node, OMX_U32 portIndex, OMX_BOOL enable,
+            OMX_U32 maxFrameWidth, OMX_U32 maxFrameHeight) = 0;
+
     virtual status_t enableGraphicBuffers(
             node_id node, OMX_U32 port_index, OMX_BOOL enable) = 0;
 
@@ -95,6 +100,16 @@ public:
     virtual status_t useGraphicBuffer(
             node_id node, OMX_U32 port_index,
             const sp<GraphicBuffer> &graphicBuffer, buffer_id *buffer) = 0;
+
+    virtual status_t updateGraphicBufferInMeta(
+            node_id node, OMX_U32 port_index,
+            const sp<GraphicBuffer> &graphicBuffer, buffer_id buffer) = 0;
+
+    virtual status_t createInputSurface(
+            node_id node, OMX_U32 port_index,
+            sp<IGraphicBufferProducer> *bufferProducer) = 0;
+
+    virtual status_t signalEndOfInputStream(node_id node) = 0;
 
     // This API clearly only makes sense if the caller lives in the
     // same process as the callee, i.e. is the media_server, as the
@@ -123,6 +138,17 @@ public:
             node_id node,
             const char *parameter_name,
             OMX_INDEXTYPE *index) = 0;
+
+    enum InternalOptionType {
+        INTERNAL_OPTION_SUSPEND,  // data is a bool
+        INTERNAL_OPTION_REPEAT_PREVIOUS_FRAME_DELAY,  // data is an int64_t
+    };
+    virtual status_t setInternalOption(
+            node_id node,
+            OMX_U32 port_index,
+            InternalOptionType type,
+            const void *data,
+            size_t size) = 0;
 };
 
 struct omx_message {

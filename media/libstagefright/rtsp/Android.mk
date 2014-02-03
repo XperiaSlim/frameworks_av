@@ -6,6 +6,7 @@ LOCAL_SRC_FILES:=       \
         AAMRAssembler.cpp           \
         AAVCAssembler.cpp           \
         AH263Assembler.cpp          \
+        AMPEG2TSAssembler.cpp       \
         AMPEG4AudioAssembler.cpp    \
         AMPEG4ElementaryAssembler.cpp \
         APacketSource.cpp           \
@@ -16,6 +17,7 @@ LOCAL_SRC_FILES:=       \
         ARTPWriter.cpp              \
         ARTSPConnection.cpp         \
         ASessionDescription.cpp     \
+        SDPLoader.cpp               \
 
 LOCAL_C_INCLUDES:= \
 	$(TOP)/frameworks/av/media/libstagefright/include \
@@ -49,7 +51,7 @@ LOCAL_C_INCLUDES:= \
 
 LOCAL_CFLAGS += -Wno-multichar
 
-LOCAL_MODULE_TAGS := debug
+LOCAL_MODULE_TAGS := optional
 
 LOCAL_MODULE:= rtp_test
 

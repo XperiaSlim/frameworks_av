@@ -252,13 +252,16 @@ status_t OMX::allocateNode(
 status_t OMX::freeNode(node_id node) {
     OMXNodeInstance *instance = findInstance(node);
 
-    ssize_t index = mLiveNodes.indexOfKey(instance->observer()->asBinder());
-    if (index < 0) {
-        // This could conceivably happen if the observer dies at roughly the
-        // same time that a client attempts to free the node explicitly.
-        return OK;
+    {
+        Mutex::Autolock autoLock(mLock);
+        ssize_t index = mLiveNodes.indexOfKey(instance->observer()->asBinder());
+        if (index < 0) {
+            // This could conceivably happen if the observer dies at roughly the
+            // same time that a client attempts to free the node explicitly.
+            return OK;
+        }
+        mLiveNodes.removeItemsAt(index);
     }
-    mLiveNodes.removeItemsAt(index);
 
     instance->observer()->asBinder()->unlinkToDeath(this);
 
@@ -266,7 +269,7 @@ status_t OMX::freeNode(node_id node) {
 
     {
         Mutex::Autolock autoLock(mLock);
-        index = mDispatchers.indexOfKey(node);
+        ssize_t index = mDispatchers.indexOfKey(node);
         CHECK(index >= 0);
         mDispatchers.removeItemsAt(index);
     }
@@ -328,6 +331,13 @@ status_t OMX::storeMetaDataInBuffers(
     return findInstance(node)->storeMetaDataInBuffers(port_index, enable);
 }
 
+status_t OMX::prepareForAdaptivePlayback(
+        node_id node, OMX_U32 portIndex, OMX_BOOL enable,
+        OMX_U32 maxFrameWidth, OMX_U32 maxFrameHeight) {
+    return findInstance(node)->prepareForAdaptivePlayback(
+            portIndex, enable, maxFrameWidth, maxFrameHeight);
+}
+
 status_t OMX::useBuffer(
         node_id node, OMX_U32 port_index, const sp<IMemory> &params,
         buffer_id *buffer) {
@@ -340,6 +350,24 @@ status_t OMX::useGraphicBuffer(
         const sp<GraphicBuffer> &graphicBuffer, buffer_id *buffer) {
     return findInstance(node)->useGraphicBuffer(
             port_index, graphicBuffer, buffer);
+}
+
+status_t OMX::updateGraphicBufferInMeta(
+        node_id node, OMX_U32 port_index,
+        const sp<GraphicBuffer> &graphicBuffer, buffer_id buffer) {
+    return findInstance(node)->updateGraphicBufferInMeta(
+            port_index, graphicBuffer, buffer);
+}
+
+status_t OMX::createInputSurface(
+        node_id node, OMX_U32 port_index,
+        sp<IGraphicBufferProducer> *bufferProducer) {
+    return findInstance(node)->createInputSurface(
+            port_index, bufferProducer);
+}
+
+status_t OMX::signalEndOfInputStream(node_id node) {
+    return findInstance(node)->signalEndOfInputStream();
 }
 
 status_t OMX::allocateBuffer(
@@ -382,6 +410,15 @@ status_t OMX::getExtensionIndex(
             parameter_name, index);
 }
 
+status_t OMX::setInternalOption(
+        node_id node,
+        OMX_U32 port_index,
+        InternalOptionType type,
+        const void *data,
+        size_t size) {
+    return findInstance(node)->setInternalOption(port_index, type, data, size);
+}
+
 OMX_ERRORTYPE OMX::OnEvent(
         node_id node,
         OMX_IN OMX_EVENTTYPE eEvent,
@@ -389,6 +426,9 @@ OMX_ERRORTYPE OMX::OnEvent(
         OMX_IN OMX_U32 nData2,
         OMX_IN OMX_PTR pEventData) {
     ALOGV("OnEvent(%d, %ld, %ld)", eEvent, nData1, nData2);
+
+    // Forward to OMXNodeInstance.
+    findInstance(node)->onEvent(eEvent, nData1, nData2);
 
     omx_message msg;
     msg.type = omx_message::EVENT;

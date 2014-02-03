@@ -1,6 +1,5 @@
 /*
  * Copyright (C) 2009 The Android Open Source Project
- * Copyright (c) 2012, Code Aurora Forum. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -32,11 +31,12 @@ namespace android {
 class AudioRecord;
 
 struct AudioSource : public MediaSource, public MediaBufferObserver {
-    // Note that the "channels" parameter is _not_ the number of channels,
-    // but a bitmask of audio_channels_t constants.
+    // Note that the "channels" parameter _is_ the number of channels,
+    // _not_ a bitmask of audio_channels_t constants.
     AudioSource(
-            audio_source_t inputSource, uint32_t sampleRate,
-            uint32_t channels = AUDIO_CHANNEL_IN_MONO);
+            audio_source_t inputSource,
+            uint32_t sampleRate,
+            uint32_t channels = 1);
 
     status_t initCheck() const;
 
@@ -50,7 +50,7 @@ struct AudioSource : public MediaSource, public MediaBufferObserver {
     virtual status_t read(
             MediaBuffer **buffer, const ReadOptions *options = NULL);
 
-    status_t dataCallbackTimestamp(const AudioRecord::Buffer& buffer, int64_t timeUs);
+    status_t dataCallback(const AudioRecord::Buffer& buffer);
     virtual void signalBufferReturned(MediaBuffer *buffer);
 
 protected:
@@ -66,14 +66,14 @@ private:
 
         // This is the initial mute duration to suppress
         // the video recording signal tone
-        kAutoRampStartUs = 700000,
+        kAutoRampStartUs = 0,
     };
 
     Mutex mLock;
     Condition mFrameAvailableCondition;
     Condition mFrameEncodingCompletionCondition;
 
-    AudioRecord *mRecord;
+    sp<AudioRecord> mRecord;
     status_t mInitCheck;
     bool mStarted;
     int32_t mSampleRate;
@@ -85,6 +85,7 @@ private:
     int64_t mInitialReadTimeUs;
     int64_t mNumFramesReceived;
     int64_t mNumClientOwnedBuffers;
+    int64_t mAutoRampStartUs;
 
     List<MediaBuffer * > mBuffersReceived;
 
@@ -103,19 +104,6 @@ private:
 
     AudioSource(const AudioSource &);
     AudioSource &operator=(const AudioSource &);
-
-#ifdef QCOM_HARDWARE
-    //additions for tunnel source
-public:
-    AudioSource(
-        audio_source_t inputSource, const sp<MetaData>& meta );
-
-private:
-    audio_format_t mFormat;
-    String8 mMime;
-    int32_t mMaxBufferSize;
-    int64_t bufferDurationUs( ssize_t n );
-#endif
 };
 
 }  // namespace android

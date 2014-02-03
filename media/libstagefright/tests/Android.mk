@@ -20,11 +20,13 @@ LOCAL_SHARED_LIBRARIES := \
 	libgui \
 	libmedia \
 	libstagefright \
-	libstagefright_omx \
 	libstagefright_foundation \
+	libstagefright_omx \
 	libstlport \
+	libsync \
 	libui \
 	libutils \
+	liblog
 
 LOCAL_STATIC_LIBRARIES := \
 	libgtest \

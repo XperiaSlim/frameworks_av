@@ -24,7 +24,7 @@
 #include <media/stagefright/MetaData.h>
 #include <system/window.h>
 #include <ui/GraphicBufferMapper.h>
-#include <gui/ISurfaceTexture.h>
+#include <gui/IGraphicBufferProducer.h>
 
 namespace android {
 
@@ -150,12 +150,11 @@ void SoftwareRenderer::render(
         const void *data, size_t size, void *platformPrivate) {
     ANativeWindowBuffer *buf;
     int err;
-    if ((err = mNativeWindow->dequeueBuffer(mNativeWindow.get(), &buf)) != 0) {
+    if ((err = native_window_dequeue_buffer_and_wait(mNativeWindow.get(),
+            &buf)) != 0) {
         ALOGW("Surface::dequeueBuffer returned error %d", err);
         return;
     }
-
-    CHECK_EQ(0, mNativeWindow->lockBuffer(mNativeWindow.get(), buf));
 
     GraphicBufferMapper &mapper = GraphicBufferMapper::get();
 
@@ -210,7 +209,6 @@ void SoftwareRenderer::render(
         const uint8_t *src_uv =
             (const uint8_t *)data + mWidth * (mHeight - mCropTop / 2);
 
-
 #ifdef EXYNOS4_ENHANCEMENTS
         void *pYUVBuf[3];
 
@@ -253,7 +251,8 @@ void SoftwareRenderer::render(
 
     CHECK_EQ(0, mapper.unlock(buf->handle));
 
-    if ((err = mNativeWindow->queueBuffer(mNativeWindow.get(), buf)) != 0) {
+    if ((err = mNativeWindow->queueBuffer(mNativeWindow.get(), buf,
+            -1)) != 0) {
         ALOGW("Surface::queueBuffer returned error %d", err);
     }
     buf = NULL;

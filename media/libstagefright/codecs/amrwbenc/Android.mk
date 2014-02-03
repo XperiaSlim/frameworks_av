@@ -101,8 +101,6 @@ LOCAL_C_INCLUDES := \
 	$(LOCAL_PATH)/src \
 	$(LOCAL_PATH)/inc
 
-LOCAL_CFLAGS := $(VO_CFLAGS)
-
 ifeq ($(VOTT), v5)
 LOCAL_CFLAGS += -DARM -DASM_OPT
 LOCAL_C_INCLUDES += $(LOCAL_PATH)/src/asm/ARMV5E
@@ -132,7 +130,7 @@ LOCAL_STATIC_LIBRARIES := \
         libstagefright_amrwbenc
 
 LOCAL_SHARED_LIBRARIES := \
-        libstagefright_omx libstagefright_foundation libutils \
+        libstagefright_omx libstagefright_foundation libutils liblog \
         libstagefright_enc_common
 
 LOCAL_MODULE := libstagefright_soft_amrwbenc

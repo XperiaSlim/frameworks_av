@@ -37,7 +37,7 @@ namespace android {
 
 class Parcel;
 class Surface;
-class ISurfaceTexture;
+class IGraphicBufferProducer;
 
 template<typename T> class SortedVector;
 
@@ -50,9 +50,7 @@ enum player_type {
     // The shared library with the test player is passed passed as an
     // argument to the 'test:' url in the setDataSource call.
     TEST_PLAYER = 5,
-
-    AAH_RX_PLAYER = 100,
-    AAH_TX_PLAYER = 101,
+    DASH_PLAYER = 6,
 };
 
 
@@ -77,9 +75,18 @@ public:
     // AudioSink: abstraction layer for audio output
     class AudioSink : public RefBase {
     public:
+        enum cb_event_t {
+            CB_EVENT_FILL_BUFFER,   // Request to write more data to buffer.
+            CB_EVENT_STREAM_END,    // Sent after all the buffers queued in AF and HW are played
+                                    // back (after stop is called)
+            CB_EVENT_TEAR_DOWN      // The AudioTrack was invalidated due to use case change:
+                                    // Need to re-evaluate offloading options
+        };
+
         // Callback returns the number of bytes actually written to the buffer.
         typedef size_t (*AudioCallback)(
-                AudioSink *audioSink, void *buffer, size_t size, void *cookie);
+                AudioSink *audioSink, void *buffer, size_t size, void *cookie,
+                        cb_event_t event);
 
         virtual             ~AudioSink() {}
         virtual bool        ready() const = 0; // audio output is open and ready
@@ -93,6 +100,7 @@ public:
         virtual status_t    getPosition(uint32_t *position) const = 0;
         virtual status_t    getFramesWritten(uint32_t *frameswritten) const = 0;
         virtual int         getSessionId() const = 0;
+        virtual audio_stream_type_t getAudioStreamType() const = 0;
 
         // If no callback is specified, use the "write" API below to submit
         // audio data.
@@ -102,9 +110,10 @@ public:
                 int bufferCount=DEFAULT_AUDIOSINK_BUFFERCOUNT,
                 AudioCallback cb = NULL,
                 void *cookie = NULL,
-                audio_output_flags_t flags = AUDIO_OUTPUT_FLAG_NONE) = 0;
+                audio_output_flags_t flags = AUDIO_OUTPUT_FLAG_NONE,
+                const audio_offload_info_t *offloadInfo = NULL) = 0;
 
-        virtual void        start() = 0;
+        virtual status_t    start() = 0;
         virtual ssize_t     write(const void* buffer, size_t size) = 0;
         virtual void        stop() = 0;
         virtual void        flush() = 0;
@@ -113,10 +122,9 @@ public:
 
         virtual status_t    setPlaybackRatePermille(int32_t rate) { return INVALID_OPERATION; }
         virtual bool        needsTrailingPadding() { return true; }
-#ifdef QCOM_HARDWARE
-        virtual ssize_t     sampleRate() const {return 0;};
-        virtual status_t    getTimeStamp(uint64_t *tstamp) {return 0;};
-#endif
+
+        virtual status_t    setParameters(const String8& keyValuePairs) { return NO_ERROR; };
+        virtual String8     getParameters(const String8& keys) { return String8::empty(); };
     };
 
                         MediaPlayerBase() : mCookie(0), mNotify(0) {}
@@ -138,9 +146,9 @@ public:
         return INVALID_OPERATION;
     }
 
-    // pass the buffered ISurfaceTexture to the media player service
+    // pass the buffered IGraphicBufferProducer to the media player service
     virtual status_t    setVideoSurfaceTexture(
-                                const sp<ISurfaceTexture>& surfaceTexture) = 0;
+                                const sp<IGraphicBufferProducer>& bufferProducer) = 0;
 
     virtual status_t    prepare() = 0;
     virtual status_t    prepareAsync() = 0;
@@ -157,12 +165,15 @@ public:
     virtual status_t    setParameter(int key, const Parcel &request) = 0;
     virtual status_t    getParameter(int key, Parcel *reply) = 0;
 
-    // Right now, only the AAX TX player supports this functionality.  For now,
-    // provide a default implementation which indicates a lack of support for
-    // this functionality to make life easier for all of the other media player
-    // maintainers out there.
+    // default no-op implementation of optional extensions
     virtual status_t setRetransmitEndpoint(const struct sockaddr_in* endpoint) {
         return INVALID_OPERATION;
+    }
+    virtual status_t getRetransmitEndpoint(struct sockaddr_in* endpoint) {
+        return INVALID_OPERATION;
+    }
+    virtual status_t setNextPlayer(const sp<MediaPlayerBase>& next) {
+        return OK;
     }
 
     // Invoke a generic method on the player by using opaque parcels
@@ -199,6 +210,11 @@ public:
     }
 
     virtual status_t dump(int fd, const Vector<String16> &args) const {
+        return INVALID_OPERATION;
+    }
+
+    virtual status_t updateProxyConfig(
+            const char *host, int32_t port, const char *exclusionList) {
         return INVALID_OPERATION;
     }
 

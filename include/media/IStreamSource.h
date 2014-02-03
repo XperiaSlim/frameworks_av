@@ -33,6 +33,15 @@ struct IStreamSource : public IInterface {
     virtual void setBuffers(const Vector<sp<IMemory> > &buffers) = 0;
 
     virtual void onBufferAvailable(size_t index) = 0;
+
+    enum {
+        // Video PES packets contain exactly one (aligned) access unit.
+        kFlagAlignedVideoData = 1,
+
+        // Timestamps are in ALooper::GetNowUs() units.
+        kFlagIsRealTimeData   = 2,
+    };
+    virtual uint32_t flags() const { return 0; }
 };
 
 struct IStreamListener : public IInterface {
@@ -66,6 +75,11 @@ struct IStreamListener : public IInterface {
     // The value should be a bitmask of values from
     // ATSParser::DiscontinuityType.
     static const char *const kKeyDiscontinuityMask;
+
+    // Optionally signalled as part of a discontinuity that includes
+    // DISCONTINUITY_TIME. It indicates the media time (in us) to be associated
+    // with the next PTS occuring in the stream. The value is of type int64_t.
+    static const char *const kKeyMediaTimeUs;
 
     virtual void issueCommand(
             Command cmd, bool synchronous, const sp<AMessage> &msg = NULL) = 0;

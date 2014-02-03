@@ -21,28 +21,82 @@
 #include <binder/IInterface.h>
 #include <binder/Parcel.h>
 
-#include <camera/ICameraClient.h>
-#include <camera/ICamera.h>
-
 namespace android {
+
+class ICamera;
+class ICameraClient;
+class IProCameraUser;
+class IProCameraCallbacks;
+class ICameraServiceListener;
+class ICameraDeviceUser;
+class ICameraDeviceCallbacks;
+class CameraMetadata;
 
 class ICameraService : public IInterface
 {
 public:
+    /**
+     * Keep up-to-date with ICameraService.aidl in frameworks/base
+     */
     enum {
         GET_NUMBER_OF_CAMERAS = IBinder::FIRST_CALL_TRANSACTION,
         GET_CAMERA_INFO,
-        CONNECT
+        CONNECT,
+        CONNECT_PRO,
+        CONNECT_DEVICE,
+        ADD_LISTENER,
+        REMOVE_LISTENER,
+        GET_CAMERA_CHARACTERISTICS,
+    };
+
+    enum {
+        USE_CALLING_UID = -1
     };
 
 public:
     DECLARE_META_INTERFACE(CameraService);
 
-    virtual int32_t         getNumberOfCameras() = 0;
-    virtual status_t        getCameraInfo(int cameraId,
+    virtual int32_t  getNumberOfCameras() = 0;
+    virtual status_t getCameraInfo(int cameraId,
                                           struct CameraInfo* cameraInfo) = 0;
-    virtual sp<ICamera>     connect(const sp<ICameraClient>& cameraClient,
-                                    int cameraId) = 0;
+
+    virtual status_t getCameraCharacteristics(int cameraId,
+                                              CameraMetadata* cameraInfo) = 0;
+
+    // Returns 'OK' if operation succeeded
+    // - Errors: ALREADY_EXISTS if the listener was already added
+    virtual status_t addListener(const sp<ICameraServiceListener>& listener)
+                                                                            = 0;
+    // Returns 'OK' if operation succeeded
+    // - Errors: BAD_VALUE if specified listener was not in the listener list
+    virtual status_t removeListener(const sp<ICameraServiceListener>& listener)
+                                                                            = 0;
+    /**
+     * clientPackageName and clientUid are used for permissions checking.  if
+     * clientUid == USE_CALLING_UID, then the calling UID is used instead. Only
+     * trusted callers can set a clientUid other than USE_CALLING_UID.
+     */
+    virtual status_t connect(const sp<ICameraClient>& cameraClient,
+            int cameraId,
+            const String16& clientPackageName,
+            int clientUid,
+            /*out*/
+            sp<ICamera>& device) = 0;
+
+    virtual status_t connectPro(const sp<IProCameraCallbacks>& cameraCb,
+            int cameraId,
+            const String16& clientPackageName,
+            int clientUid,
+            /*out*/
+            sp<IProCameraUser>& device) = 0;
+
+    virtual status_t connectDevice(
+            const sp<ICameraDeviceCallbacks>& cameraCb,
+            int cameraId,
+            const String16& clientPackageName,
+            int clientUid,
+            /*out*/
+            sp<ICameraDeviceUser>& device) = 0;
 };
 
 // ----------------------------------------------------------------------------

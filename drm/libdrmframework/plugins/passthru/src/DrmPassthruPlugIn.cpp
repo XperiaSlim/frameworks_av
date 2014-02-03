@@ -65,10 +65,11 @@ DrmConstraints* DrmPassthruPlugIn::onGetConstraints(
     char* charValue = NULL;
     charValue = new char[value.length() + 1];
     strncpy(charValue, value.string(), value.length());
+    charValue[value.length()] = '\0';
 
     //Just add dummy available time for verification
     drmConstraints->put(&(DrmConstraints::LICENSE_AVAILABLE_TIME), charValue);
-
+    delete[] charValue;
     return drmConstraints;
 }
 
@@ -163,7 +164,7 @@ bool DrmPassthruPlugIn::onCanHandle(int uniqueId, const String8& path) {
     return (String8(".passthru") == extension);
 }
 
-String8 DrmPassthruPlugIn::onGetOriginalMimeType(int uniqueId, const String8& path) {
+String8 DrmPassthruPlugIn::onGetOriginalMimeType(int uniqueId, const String8& path, int fd) {
     ALOGV("DrmPassthruPlugIn::onGetOriginalMimeType() : %d", uniqueId);
     return String8("video/passthru");
 }
